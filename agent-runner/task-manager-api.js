@@ -533,16 +533,34 @@ class TaskManagerAPI {
   }
 
   /**
-   * Send a heartbeat to the server to track runner connectivity
+   * Send a heartbeat to the server to track runner connectivity (Universal Runner)
    */
   async sendHeartbeat(runnerToken) {
     try {
       await fetch(`${this.config.apiUrl}/runner/heartbeat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ runnerToken })
+        body: JSON.stringify({ token: runnerToken })
       });
     } catch (e) {}
+  }
+
+  /**
+   * Get all tasks for the runner (Universal Runner - includes all user's projects)
+   */
+  async getRunnerTasks(runnerToken) {
+    try {
+      const response = await fetch(`${this.config.apiUrl}/runner/tasks?token=${runnerToken}`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch runner tasks: ${response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('[API] Error fetching runner tasks:', error.message);
+      return [];
+    }
   }
 
   // ========== PROJECTS ==========

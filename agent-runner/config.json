@@ -1,9 +1,8 @@
 {
   "taskManagerAPI": {
     "apiUrl": "http://localhost:3001/api",
-    "email": "claude@taskmanager.com",
-    "password": ".PX0UQUBN67Nme32",
-    "claudeAssignee": "Claude"
+    "runnerToken": "havl313ib5lsu44jm4kgck",
+    "projectToken": "havl313ib5lsu44jm4kgck"
   },
   "schedule": {
     "checkInterval": "*/30 * * * *",

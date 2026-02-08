@@ -200,6 +200,10 @@ db.serialize(() => {
   db.run(`ALTER TABLE users ADD COLUMN system_prompt TEXT`, () => {});
   db.run(`ALTER TABLE users ADD COLUMN model_config TEXT`, () => {}); // JSON string for model settings
 
+  // Add universal runner token columns to users
+  db.run(`ALTER TABLE users ADD COLUMN runner_token TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN runner_last_seen DATETIME`, () => {});
+
   // Create projects table
   db.run(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -462,6 +466,57 @@ app.get('/api/tasks', authenticateToken, cacheAPI(60), async (req, res) => { // 
       LEFT JOIN users c ON t.created_by = c.id
       ORDER BY t.created_at DESC
     `);
+
+    // Transform tasks to include user objects
+    const transformedTasks = tasks.map(task => ({
+      ...task,
+      assignee: task.assignee_id ? {
+        id: task.assignee_id,
+        name: task.assignee_name,
+        email: task.assignee_email,
+        avatar: task.assignee_avatar || '👤',
+        role: task.assignee_role
+      } : null,
+      createdBy: task.creator_id ? {
+        id: task.creator_id,
+        name: task.creator_name,
+        email: task.creator_email,
+        avatar: task.creator_avatar || '👤',
+        role: task.creator_role
+      } : null
+    }));
+
+    res.json(transformedTasks);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get scheduled tasks for calendar view (MUST come before /api/tasks/:id to avoid route collision)
+app.get('/api/tasks/scheduled', authenticateToken, validateScheduledQuery, async (req, res) => {
+  const { start_date, end_date } = req.query;
+
+  try {
+    const tasks = await all(`
+      SELECT t.*,
+             u.id as assignee_id,
+             u.name as assignee_name,
+             u.email as assignee_email,
+             u.avatar as assignee_avatar,
+             u.role as assignee_role,
+             c.id as creator_id,
+             c.name as creator_name,
+             c.email as creator_email,
+             c.avatar as creator_avatar,
+             c.role as creator_role
+      FROM tasks t
+      LEFT JOIN users u ON t.assignee_id = u.id
+      LEFT JOIN users c ON t.created_by = c.id
+      WHERE t.scheduled_date IS NOT NULL
+        AND t.scheduled_date >= ?
+        AND t.scheduled_date <= ?
+      ORDER BY t.scheduled_date, t.scheduled_time
+    `, [start_date, end_date]);
 
     // Transform tasks to include user objects
     const transformedTasks = tasks.map(task => ({
@@ -757,57 +812,6 @@ app.put('/api/tasks/:id/schedule', authenticateToken, async (req, res) => {
       } : null
     };
     res.json(transformedTask);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get scheduled tasks for calendar view
-app.get('/api/tasks/scheduled', authenticateToken, validateScheduledQuery, async (req, res) => {
-  const { start_date, end_date } = req.query;
-
-  try {
-    const tasks = await all(`
-      SELECT t.*,
-             u.id as assignee_id,
-             u.name as assignee_name,
-             u.email as assignee_email,
-             u.avatar as assignee_avatar,
-             u.role as assignee_role,
-             c.id as creator_id,
-             c.name as creator_name,
-             c.email as creator_email,
-             c.avatar as creator_avatar,
-             c.role as creator_role
-      FROM tasks t
-      LEFT JOIN users u ON t.assignee_id = u.id
-      LEFT JOIN users c ON t.created_by = c.id
-      WHERE t.scheduled_date IS NOT NULL
-        AND t.scheduled_date >= ?
-        AND t.scheduled_date <= ?
-      ORDER BY t.scheduled_date, t.scheduled_time
-    `, [start_date, end_date]);
-
-    // Transform tasks to include user objects
-    const transformedTasks = tasks.map(task => ({
-      ...task,
-      assignee: task.assignee_id ? {
-        id: task.assignee_id,
-        name: task.assignee_name,
-        email: task.assignee_email,
-        avatar: task.assignee_avatar || '👤',
-        role: task.assignee_role
-      } : null,
-      createdBy: task.creator_id ? {
-        id: task.creator_id,
-        name: task.creator_name,
-        email: task.creator_email,
-        avatar: task.creator_avatar || '👤',
-        role: task.creator_role
-      } : null
-    }));
-
-    res.json(transformedTasks);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1215,6 +1219,132 @@ app.post('/api/projects', authenticateToken, async (req, res) => {
   }
 });
 
+// --- RUNNER (UNIVERSAL) ROUTES ---
+
+// Generate runner token for the authenticated user
+app.post('/api/runner/generate-token', authenticateToken, async (req, res) => {
+  try {
+    const runnerToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+    await run(
+      'UPDATE users SET runner_token = ? WHERE id = ?',
+      [runnerToken, req.user.id]
+    );
+
+    res.json({
+      token: runnerToken,
+      message: 'Runner token generated successfully'
+    });
+  } catch (err) {
+    logger.error('Failed to generate runner token:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get runner status for the authenticated user
+app.get('/api/runner/status', authenticateToken, async (req, res) => {
+  try {
+    const user = await get(
+      'SELECT runner_token, runner_last_seen FROM users WHERE id = ?',
+      [req.user.id]
+    );
+
+    const isOnline = user?.runner_last_seen &&
+                     (Date.now() - new Date(user.runner_last_seen).getTime() < 60000);
+
+    res.json({
+      hasToken: !!user?.runner_token,
+      token: user?.runner_token,
+      lastSeen: user?.runner_last_seen,
+      isOnline
+    });
+  } catch (err) {
+    logger.error('Failed to get runner status:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Runner heartbeat endpoint (called by agent-runner)
+app.post('/api/runner/heartbeat', async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Runner token required' });
+  }
+
+  try {
+    const result = await run(
+      'UPDATE users SET runner_last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?',
+      [token]
+    );
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Invalid runner token' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Runner heartbeat failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get tasks for runner (includes full project context)
+app.get('/api/runner/tasks', async (req, res) => {
+  const { token } = req.query;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Runner token required' });
+  }
+
+  try {
+    // Find user by runner token
+    const user = await get('SELECT id FROM users WHERE runner_token = ?', [token]);
+
+    if (!user) {
+      return res.status(404).json({ error: 'Invalid runner token' });
+    }
+
+    // Get all projects the user has access to
+    const projects = await all(`
+      SELECT p.* FROM projects p
+      WHERE p.created_by = ?
+      OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+    `, [user.id, user.id]);
+
+    const projectIds = projects.map(p => p.id);
+
+    if (projectIds.length === 0) {
+      return res.json([]);
+    }
+
+    // Get all pending tasks for these projects with full context
+    const placeholders = projectIds.map(() => '?').join(',');
+    const tasks = await all(`
+      SELECT
+        t.*,
+        p.id as project_id,
+        p.name as project_name,
+        p.repository_path as project_repository_path,
+        p.global_rules as project_global_rules,
+        u.name as assignee_name,
+        c.name as creator_name
+      FROM tasks t
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN users u ON t.assignee_id = u.id
+      LEFT JOIN users c ON t.created_by = c.id
+      WHERE t.project_id IN (${placeholders})
+      AND t.status = 'todo'
+      ORDER BY t.created_at ASC
+    `, projectIds);
+
+    res.json(tasks);
+  } catch (err) {
+    logger.error('Failed to fetch runner tasks:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- AGENTS (AI USERS) ROUTES ---
 
 app.get('/api/agents', authenticateToken, async (req, res) => {
@@ -1246,6 +1376,59 @@ app.post('/api/agents', authenticateToken, async (req, res) => {
     
     const agent = await get('SELECT id, name, email, avatar, system_prompt, model_config FROM users WHERE id = ?', [id]);
     res.json(agent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an agent
+app.put('/api/agents/:id', authenticateToken, async (req, res) => {
+  const { name, system_prompt, model_config, provider } = req.body;
+  const { id } = req.params;
+
+  try {
+    // Check if agent exists
+    const existingAgent = await get('SELECT * FROM users WHERE id = ? AND is_ai = 1', [id]);
+    if (!existingAgent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    // Update agent
+    await run(
+      `UPDATE users SET
+        name = COALESCE(?, name),
+        system_prompt = COALESCE(?, system_prompt),
+        model_config = COALESCE(?, model_config)
+       WHERE id = ? AND is_ai = 1`,
+      [
+        name,
+        system_prompt,
+        model_config ? JSON.stringify({ provider, ...model_config }) : null,
+        id
+      ]
+    );
+
+    const updatedAgent = await get('SELECT id, name, email, avatar, system_prompt, model_config FROM users WHERE id = ?', [id]);
+    res.json(updatedAgent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete an agent
+app.delete('/api/agents/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Check if agent exists
+    const agent = await get('SELECT * FROM users WHERE id = ? AND is_ai = 1', [id]);
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    // Delete agent
+    await run('DELETE FROM users WHERE id = ? AND is_ai = 1', [id]);
+    res.json({ success: true, message: 'Agent deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

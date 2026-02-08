@@ -28,8 +28,7 @@ class EnvironmentSetup {
   }
 
   async checkAndInstallTools() {
-    console.log('
-🔍 Auditing local AI environment...');
+    console.log('\n🔍 Auditing local AI environment...');
     
     for (const tool of this.requiredTools) {
       process.stdout.write(`   - Checking ${tool.name}... `);
@@ -43,9 +42,7 @@ class EnvironmentSetup {
       }
     }
     
-    console.log('
-✨ Environment ready.
-');
+    console.log('\n✨ Environment ready.\n');
   }
 
   async installTool(tool) {

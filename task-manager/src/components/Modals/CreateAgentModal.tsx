@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import * as React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Bot, Brain } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,15 +12,34 @@ interface CreateAgentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  editingAgent?: any;
 }
 
 const API_URL = 'http://localhost:3001/api';
 
-export function CreateAgentModal({ isOpen, onClose, onSuccess }: CreateAgentModalProps) {
+export function CreateAgentModal({ isOpen, onClose, onSuccess, editingAgent }: CreateAgentModalProps) {
   const [name, setName] = useState('');
   const [provider, setProvider] = useState('claude');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isSubmitting, setIsPosting] = useState(false);
+
+  // Load editing agent data when modal opens
+  React.useEffect(() => {
+    if (editingAgent) {
+      setName(editingAgent.name || '');
+      setSystemPrompt(editingAgent.system_prompt || '');
+      try {
+        const config = JSON.parse(editingAgent.model_config || '{}');
+        setProvider(config.provider || 'claude');
+      } catch (e) {
+        setProvider('claude');
+      }
+    } else {
+      setName('');
+      setSystemPrompt('');
+      setProvider('claude');
+    }
+  }, [editingAgent, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,8 +47,13 @@ export function CreateAgentModal({ isOpen, onClose, onSuccess }: CreateAgentModa
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/agents`, {
-        method: 'POST',
+      const url = editingAgent
+        ? `${API_URL}/agents/${editingAgent.id}`
+        : `${API_URL}/agents`;
+      const method = editingAgent ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -42,14 +67,15 @@ export function CreateAgentModal({ isOpen, onClose, onSuccess }: CreateAgentModa
       });
 
       if (res.ok) {
-        toast.success('AI Agent created successfully');
+        toast.success(editingAgent ? 'AI Agent updated successfully' : 'AI Agent created successfully');
         onSuccess();
         onClose();
         setName('');
         setSystemPrompt('');
+        setProvider('claude');
       } else {
         const data = await res.json();
-        throw new Error(data.error || 'Failed to create agent');
+        throw new Error(data.error || `Failed to ${editingAgent ? 'update' : 'create'} agent`);
       }
     } catch (error: any) {
       toast.error(error.message);
@@ -80,7 +106,7 @@ export function CreateAgentModal({ isOpen, onClose, onSuccess }: CreateAgentModa
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
                   <Bot className="w-5 h-5 text-primary" />
-                  Define New AI Agent
+                  {editingAgent ? 'Edit AI Agent' : 'Define New AI Agent'}
                 </h2>
                 <button
                   onClick={onClose}
@@ -139,7 +165,10 @@ export function CreateAgentModal({ isOpen, onClose, onSuccess }: CreateAgentModa
                     Cancel
                   </Button>
                   <Button type="submit" disabled={isSubmitting} className="flex-1 bg-primary hover:bg-primary/90">
-                    {isSubmitting ? 'Defining...' : 'Define Agent'}
+                    {isSubmitting
+                      ? (editingAgent ? 'Updating...' : 'Defining...')
+                      : (editingAgent ? 'Update Agent' : 'Define Agent')
+                    }
                   </Button>
                 </div>
               </form>

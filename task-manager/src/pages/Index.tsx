@@ -15,13 +15,15 @@ import { Task, Status } from '@/types/task';
 import { toast } from 'sonner';
 import { startOfWeek, endOfWeek, addWeeks, format } from 'date-fns';
 import { Button } from '@/components/ui/button';
-import { Terminal, Cpu, CheckSquare, Plus } from 'lucide-react';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Terminal, Cpu, CheckSquare, Plus, Bot, Pencil, Trash2 } from 'lucide-react';
 
 // Lazy load heavy components
 const WeeklyCalendar = lazy(() => import('@/components/Calendar').then(m => ({ default: m.WeeklyCalendar })));
 const AnalyticsDashboard = lazy(() => import('@/components/Analytics').then(m => ({ default: m.AnalyticsDashboard })));
 const SettingsPage = lazy(() => import('@/components/Settings').then(m => ({ default: m.SettingsPage })));
 const LoginPage = lazy(() => import('@/components/Auth/LoginPage').then(m => ({ default: m.LoginPage })));
+const RunnerPage = lazy(() => import('./RunnerPage').then(m => ({ default: m.RunnerPage })));
 
 const API_URL = 'http://localhost:3001/api';
 
@@ -35,6 +37,7 @@ const Index = () => {
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
   const [isCreateSpecialistOpen, setIsCreateSpecialistOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<any>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [defaultStatus, setDefaultStatus] = useState<Status>('todo');
@@ -209,6 +212,30 @@ const Index = () => {
       setAgents(data);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const deleteAgent = async (agentId: string) => {
+    if (!confirm('Are you sure you want to delete this AI agent? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/agents/${agentId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        toast.success('Agent deleted successfully');
+        fetchAgents(token!);
+      } else {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to delete agent');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete agent');
     }
   };
 
@@ -558,7 +585,7 @@ const Index = () => {
                 className="mb-6"
               >
                 <h2 className="text-2xl font-bold text-foreground mb-1">
-                  Good morning, {currentUser.name.split(' ')[0]}! 👋
+                  Good morning, {currentUser?.name?.split(' ')[0] || 'User'}! 👋
                 </h2>
                 <p className="text-muted-foreground">
                   Here's what's happening with your projects today.
@@ -590,49 +617,37 @@ const Index = () => {
                 <h2 className="text-2xl font-bold text-foreground">Projects</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {projects.map(project => {
-                  const isOnline = project.last_seen && (Date.now() - new Date(project.last_seen).getTime() < 60000);
-                  const connectCommand = `npx agent-runner connect --token=${project.runner_token} --url=${API_URL}`;
-                  
-                  return (
-                    <div key={project.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all group relative flex flex-col">
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-lg font-semibold text-foreground group-hover:text-primary">{project.name}</h3>
-                        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${isOnline ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-success animate-pulse' : 'bg-muted-foreground'}`} />
-                          {isOnline ? 'Online' : 'Offline'}
-                        </div>
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{project.description}</p>
-                      
-                      <div className="space-y-3 mt-auto">
-                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-secondary/50 p-2 rounded truncate">
-                          <Terminal className="w-3 h-3 text-primary" />
-                          <code className="truncate">{project.repository_path}</code>
-                        </div>
-
-                        <div className="bg-black/40 rounded-lg p-3 border border-white/5 group/cmd relative">
-                          <p className="text-[9px] text-muted-foreground mb-2 uppercase font-bold tracking-widest">Connect Command</p>
-                          <code className="text-[10px] text-primary block truncate font-mono">
-                            {connectCommand}
-                          </code>
-                          <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(connectCommand);
-                              toast.success('Command copied to clipboard');
-                            }}
-                            className="absolute top-2 right-2 p-1 rounded bg-secondary opacity-0 group-hover/cmd:opacity-100 transition-opacity"
-                          >
-                            <CheckSquare className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
+                {projects.map(project => (
+                  <div key={project.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all group relative flex flex-col">
+                    <div className="mb-3">
+                      <h3 className="text-lg font-semibold text-foreground group-hover:text-primary transition-colors">{project.name}</h3>
                     </div>
-                  );
-                })}
+                    <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{project.description}</p>
+
+                    <div className="space-y-3 mt-auto">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/50 p-2.5 rounded">
+                        <Terminal className="w-4 h-4 text-primary flex-shrink-0" />
+                        <code className="truncate">{project.repository_path}</code>
+                      </div>
+
+                      {project.global_rules && (
+                        <div className="bg-primary/5 border border-primary/10 rounded-lg p-3">
+                          <p className="text-[10px] text-muted-foreground mb-1.5 uppercase font-bold tracking-wider">Global Rules</p>
+                          <p className="text-xs text-muted-foreground line-clamp-2 italic">{project.global_rules}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
                 {projects.length === 0 && <p className="text-muted-foreground">No projects defined yet.</p>}
               </div>
             </motion.div>
+          )}
+
+          {activeTab === 'runner' && (
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>}>
+              <RunnerPage />
+            </Suspense>
           )}
 
           {activeTab === 'team' && (
@@ -641,32 +656,72 @@ const Index = () => {
                 <h2 className="text-2xl font-bold text-foreground">AI Team</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {agents.map(agent => (
-                  <div key={agent.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all">
-                    <div className="flex items-center gap-3 mb-4">
-                      <Avatar className="w-10 h-10 ring-2 ring-primary/20">
-                        <AvatarImage src={agent.avatar} />
-                        <AvatarFallback>{agent.name[0]}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <h3 className="font-semibold text-foreground">{agent.name}</h3>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase font-bold tracking-wider">
-                          {(() => {
-                            try {
-                              return JSON.parse(agent.model_config || '{}').provider || 'AI';
-                            } catch (e) {
-                              return 'AI';
-                            }
-                          })()}
-                        </span>
+                {agents.map(agent => {
+                  const config = (() => {
+                    try {
+                      return JSON.parse(agent.model_config || '{}');
+                    } catch (e) {
+                      return {};
+                    }
+                  })();
+                  const provider = config.provider || 'AI';
+                  const model = config.model || '';
+
+                  return (
+                    <div key={agent.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all group hover:shadow-lg relative">
+                      {/* Edit/Delete Buttons */}
+                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        <button
+                          onClick={() => {
+                            setEditingAgent(agent);
+                            setIsCreateAgentOpen(true);
+                          }}
+                          className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
+                          title="Edit agent"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => deleteAgent(agent.id)}
+                          className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
+                          title="Delete agent"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
+
+                      <div className="flex items-center gap-3 mb-4">
+                        <Avatar className="w-12 h-12 ring-2 ring-primary/20 group-hover:ring-primary/40 transition-all">
+                          <AvatarImage src={agent.avatar} />
+                          <AvatarFallback className="bg-primary/10 text-primary font-bold">{agent.name[0]}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">{agent.name}</h3>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase font-bold tracking-wide">
+                              {provider}
+                            </span>
+                            {model && (
+                              <span className="text-[10px] text-muted-foreground truncate">
+                                {model}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground line-clamp-4 italic border-l-2 border-primary/30 pl-3 py-2 leading-relaxed">
+                        "{agent.system_prompt}"
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground line-clamp-4 italic border-l-2 border-primary/30 pl-3 py-1">
-                      "{agent.system_prompt}"
-                    </p>
+                  );
+                })}
+                {agents.length === 0 && (
+                  <div className="col-span-full text-center py-12">
+                    <Bot className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
+                    <p className="text-muted-foreground">No AI agents defined yet.</p>
+                    <p className="text-sm text-muted-foreground/70 mt-1">Click "New Agent" to create your first AI team member</p>
                   </div>
-                ))}
-                {agents.length === 0 && <p className="text-muted-foreground">No AI agents defined yet.</p>}
+                )}
               </div>
             </motion.div>
           )}
@@ -808,11 +863,16 @@ const Index = () => {
 
       <CreateAgentModal
         isOpen={isCreateAgentOpen}
-        onClose={() => setIsCreateAgentOpen(false)}
+        onClose={() => {
+          setIsCreateAgentOpen(false);
+          setEditingAgent(null);
+        }}
         onSuccess={() => {
           const token = localStorage.getItem('token');
           if (token) fetchAgents(token);
+          setEditingAgent(null);
         }}
+        editingAgent={editingAgent}
       />
 
       <CreateSpecialistModal

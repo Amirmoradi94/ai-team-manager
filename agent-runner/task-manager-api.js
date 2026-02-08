@@ -489,6 +489,117 @@ class TaskManagerAPI {
     }
   }
 
+  /**
+   * Get the complete payload for the runner (Task + Identity + Specialists + History)
+   */
+  async getRunnerPayload(taskId) {
+    if (!this.token) {
+      throw new Error('Not authenticated. Call login() first.');
+    }
+
+    console.log(`[API] Fetching runner payload for task ${taskId}...`);
+
+    try {
+      const response = await fetch(`${this.config.apiUrl}/runner/task/${taskId}`, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch runner payload: ${response.statusText}`);
+      }
+
+      const payload = await response.json();
+      console.log(`[API] Runner payload fetched successfully`);
+      return payload;
+    } catch (error) {
+      console.error(`[API] Error fetching runner payload:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Send log chunks to the Task Manager for real-time streaming
+   */
+  async sendRunnerLogs(taskId, chunk) {
+    try {
+      await fetch(`${this.config.apiUrl}/runner/logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId, chunk })
+      });
+    } catch (e) {}
+  }
+
+  /**
+   * Send a heartbeat to the server to track runner connectivity
+   */
+  async sendHeartbeat(runnerToken) {
+    try {
+      await fetch(`${this.config.apiUrl}/runner/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runnerToken })
+      });
+    } catch (e) {}
+  }
+
+  // ========== PROJECTS ==========
+
+  async getAllProjects() {
+    return this._get('/projects');
+  }
+
+  async createProject(data) {
+    return this._post('/projects', data);
+  }
+
+  // ========== AGENTS ==========
+
+  async getAllAgents() {
+    return this._get('/agents');
+  }
+
+  async createAgent(data) {
+    return this._post('/agents', data);
+  }
+
+  // ========== SPECIALISTS ==========
+
+  async getAllSpecialists() {
+    return this._get('/specialists');
+  }
+
+  async createSpecialist(data) {
+    return this._post('/specialists', data);
+  }
+
+  // ========== PRIVATE HELPERS ==========
+
+  async _get(endpoint) {
+    if (!this.token) throw new Error('Not authenticated');
+    const response = await fetch(`${this.config.apiUrl}${endpoint}`, {
+      headers: { 'Authorization': `Bearer ${this.token}` }
+    });
+    if (!response.ok) throw new Error(`GET ${endpoint} failed: ${response.statusText}`);
+    return response.json();
+  }
+
+  async _post(endpoint, data) {
+    if (!this.token) throw new Error('Not authenticated');
+    const response = await fetch(`${this.config.apiUrl}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error(`POST ${endpoint} failed: ${response.statusText}`);
+    return response.json();
+  }
+
   // ========== TASK COMMENTS ==========
 
   /**

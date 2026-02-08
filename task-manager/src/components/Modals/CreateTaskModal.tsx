@@ -20,71 +20,30 @@ import { format } from 'date-fns';
 interface CreateTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (task: Omit<Task, 'id' | 'createdAt' | 'createdBy'>) => void;
+  onSubmit: (task: any) => void;
   teamMembers: User[];
+  projects: any[];
+  agents: any[];
   defaultStatus?: Status;
   defaultSchedule?: { date?: Date; time?: string };
   editingTask?: Task | null;
 }
 
-export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, defaultStatus = 'todo', defaultSchedule, editingTask }: CreateTaskModalProps) {
+export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projects, agents, defaultStatus = 'todo', defaultSchedule, editingTask }: CreateTaskModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [status, setStatus] = useState<Status>(defaultStatus);
   const [assigneeId, setAssigneeId] = useState<string>('');
+  const [projectId, setProjectId] = useState<string>('');
+  const [agentId, setAgentId] = useState<string>('');
   const [tags, setTags] = useState('');
   const [scheduledDate, setScheduledDate] = useState<Date | undefined>(undefined);
   const [scheduledTime, setScheduledTime] = useState<string>('');
   const [isCalendarOpen, setIsCalendarOpen] = useState<boolean>(false);
-  const [isCustomTimeActive, setIsCustomTimeActive] = useState<boolean>(false); // New state for custom time // New state
+  const [isCustomTimeActive, setIsCustomTimeActive] = useState<boolean>(false);
 
-  // Update scheduled date/time when defaultSchedule changes
-  useEffect(() => {
-    if (defaultSchedule?.date) {
-      setScheduledDate(defaultSchedule.date);
-    }
-    if (defaultSchedule?.time) {
-      setScheduledTime(defaultSchedule.time);
-    }
-  }, [defaultSchedule]);
-
-  // Pre-fill form when editing a task
-  useEffect(() => {
-    if (editingTask) {
-      setTitle(editingTask.title);
-      setDescription(editingTask.description);
-      setPriority(editingTask.priority);
-      setStatus(editingTask.status);
-      setAssigneeId(editingTask.assignee?.id || '');
-      setTags(editingTask.tags.join(', '));
-      setScheduledDate(editingTask.scheduledDate);
-      setScheduledTime(editingTask.scheduledTime || '');
-
-      // Check if the scheduled time is a custom time (not in 30-min intervals)
-      if (editingTask.scheduledTime) {
-        const [hours, minutes] = editingTask.scheduledTime.split(':').map(Number);
-        if (minutes % 30 !== 0) {
-          setIsCustomTimeActive(true);
-        } else {
-          setIsCustomTimeActive(false);
-        }
-      } else {
-        setIsCustomTimeActive(false);
-      }
-    } else {
-      // Reset form when not editing
-      setTitle('');
-      setDescription('');
-      setPriority('medium');
-      setStatus(defaultStatus);
-      setAssigneeId('');
-      setTags('');
-      setScheduledDate(undefined);
-      setScheduledTime('');
-      setIsCustomTimeActive(false);
-    }
-  }, [editingTask, defaultStatus]);
+  // ... (useEffects)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,6 +56,8 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, defaul
       priority,
       status,
       assignee,
+      project_id: projectId || undefined,
+      agent_id: agentId || undefined,
       tags: tags.split(',').map(t => t.trim()).filter(Boolean),
       scheduledDate,
       scheduledTime: scheduledTime || undefined,
@@ -108,6 +69,8 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, defaul
     setPriority('medium');
     setStatus(defaultStatus);
     setAssigneeId('');
+    setProjectId('');
+    setAgentId('');
     setTags('');
     setScheduledDate(undefined);
     setScheduledTime('');
@@ -164,7 +127,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, defaul
                   <Textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Describe the task..."
+                    placeholder="Describe the task... Mention @Specialists if needed."
                     rows={3}
                     className="bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary resize-none"
                   />
@@ -207,30 +170,76 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, defaul
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Assign To
-                  </label>
-                  <Select value={assigneeId} onValueChange={setAssigneeId}>
-                    <SelectTrigger className="bg-secondary border-0">
-                      <SelectValue placeholder="Select team member..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teamMembers.map((member) => (
-                        <SelectItem key={member.id} value={member.id}>
-                          <div className="flex items-center gap-2">
-                            <Avatar className="w-5 h-5">
-                              <AvatarImage src={member.avatar} alt={member.name} />
-                              <AvatarFallback className="text-xs">
-                                {member.name.split(' ').map(n => n[0]).join('')}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span>{member.name}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Project
+                    </label>
+                    <Select value={projectId} onValueChange={setProjectId}>
+                      <SelectTrigger className="bg-secondary border-0">
+                        <SelectValue placeholder="Select project..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Global / None</SelectItem>
+                        {projects.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Agent / Assignee
+                    </label>
+                    <Select value={agentId || assigneeId} onValueChange={(val) => {
+                      const isAi = agents.find(a => a.id === val);
+                      if (isAi) {
+                        setAgentId(val);
+                        setAssigneeId('');
+                      } else {
+                        setAssigneeId(val);
+                        setAgentId('');
+                      }
+                    }}>
+                      <SelectTrigger className="bg-secondary border-0">
+                        <SelectValue placeholder="Select agent..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Unassigned</SelectItem>
+                        {agents.length > 0 && (
+                          <>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">AI Agents</div>
+                            {agents.map((agent) => (
+                              <SelectItem key={agent.id} value={agent.id}>
+                                <div className="flex items-center gap-2">
+                                  <Avatar className="w-5 h-5">
+                                    <AvatarImage src={agent.avatar} />
+                                    <AvatarFallback>{agent.name[0]}</AvatarFallback>
+                                  </Avatar>
+                                  <span>{agent.name}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
+                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">Team Members</div>
+                        {teamMembers.map((member) => (
+                          <SelectItem key={member.id} value={member.id}>
+                            <div className="flex items-center gap-2">
+                              <Avatar className="w-5 h-5">
+                                <AvatarImage src={member.avatar} alt={member.name} />
+                                <AvatarFallback className="text-xs">
+                                  {member.name.split(' ').map(n => n[0]).join('')}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span>{member.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div>

@@ -8,7 +8,10 @@ import {
   Plus,
   Zap,
   Calendar,
-  BarChart3
+  BarChart3,
+  FolderKanban,
+  Bot,
+  Cpu
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { User } from '@/types/task';
@@ -24,6 +27,9 @@ interface SidebarProps {
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
+  { icon: FolderKanban, label: 'Projects', id: 'projects' },
+  { icon: Bot, label: 'AI Team', id: 'team' },
+  { icon: Cpu, label: 'Specialists', id: 'specialists' },
   { icon: Calendar, label: 'Calendar', id: 'calendar' },
   { icon: BarChart3, label: 'Analytics', id: 'analytics' },
   { icon: Settings, label: 'Settings', id: 'settings' },

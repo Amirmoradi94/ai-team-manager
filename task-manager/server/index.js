@@ -39,7 +39,18 @@ if (process.env.JWT_SECRET === 'your-super-secret-jwt-key-change-this-in-product
   console.warn('⚠️  WARNING: Using default JWT_SECRET. Change this in production!');
 }
 
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',');
+
 const app = express();
+const server = require('http').createServer(app);
+const io = require('socket.io')(server, {
+  cors: {
+    origin: corsOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
@@ -80,7 +91,15 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (corsOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -187,6 +206,7 @@ db.serialize(() => {
     name TEXT NOT NULL,
     description TEXT,
     repository_path TEXT,
+    global_rules TEXT, -- Project-specific rules/constraints
     created_by TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(created_by) REFERENCES users(id)
@@ -202,6 +222,24 @@ db.serialize(() => {
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+
+  // Create specialists table (Sub-Agents)
+  db.run(`CREATE TABLE IF NOT EXISTS specialists (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    system_prompt TEXT,
+    tools TEXT, -- JSON string of allowed tools
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Add runner_token to projects
+  db.run(`ALTER TABLE projects ADD COLUMN runner_token TEXT`, () => {});
+  db.run(`ALTER TABLE projects ADD COLUMN last_seen DATETIME`, () => {});
+
+  // Add project and agent links to tasks
+  db.run(`ALTER TABLE tasks ADD COLUMN project_id TEXT`, () => {});
+  db.run(`ALTER TABLE tasks ADD COLUMN agent_id TEXT`, () => {});
 
   // Add execution metadata columns to tasks
   db.run(`ALTER TABLE tasks ADD COLUMN execution_time INTEGER`, () => {}); // in milliseconds
@@ -1149,13 +1187,170 @@ app.delete('/api/settings/:key', authenticateToken, requireAdmin, async (req, re
   }
 });
 
+// --- PROJECTS ROUTES ---
+
+app.get('/api/projects', authenticateToken, async (req, res) => {
+  try {
+    const projects = await all('SELECT * FROM projects ORDER BY created_at DESC');
+    res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects', authenticateToken, async (req, res) => {
+  const { name, description, repository_path, global_rules } = req.body;
+  const id = Math.random().toString(36).substr(2, 9);
+  const runner_token = Math.random().toString(36).substr(2, 15); // Simple token
+
+  try {
+    await run(
+      'INSERT INTO projects (id, name, description, repository_path, global_rules, runner_token, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, name, description, repository_path, global_rules, runner_token, req.user.id]
+    );
+    const project = await get('SELECT * FROM projects WHERE id = ?', [id]);
+    res.json(project);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- AGENTS (AI USERS) ROUTES ---
+
+app.get('/api/agents', authenticateToken, async (req, res) => {
+  try {
+    const agents = await all('SELECT id, name, email, avatar, system_prompt, model_config, role FROM users WHERE is_ai = 1');
+    res.json(agents);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/agents', authenticateToken, async (req, res) => {
+  const { name, system_prompt, model_config, provider } = req.body;
+  const id = Math.random().toString(36).substr(2, 9);
+  const email = `${name.toLowerCase().replace(/\s+/g, '.')}_ai@taskmanager.com`;
+  const avatar = '/claude-profile.png'; // Default AI avatar
+
+  try {
+    // Check if name already exists
+    const existing = await get('SELECT * FROM users WHERE email = ?', [email]);
+    if (existing) {
+      return res.status(400).json({ error: 'Agent with this name already exists' });
+    }
+
+    await run(
+      'INSERT INTO users (id, name, email, avatar, role, is_ai, system_prompt, model_config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, name, email, avatar, 'member', 1, system_prompt, JSON.stringify({ provider, ...model_config })]
+    );
+    
+    const agent = await get('SELECT id, name, email, avatar, system_prompt, model_config FROM users WHERE id = ?', [id]);
+    res.json(agent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- SPECIALISTS (SUB-AGENTS) ROUTES ---
+
+app.get('/api/specialists', authenticateToken, async (req, res) => {
+  try {
+    const specialists = await all('SELECT * FROM specialists ORDER BY name ASC');
+    res.json(specialists);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/specialists', authenticateToken, async (req, res) => {
+  const { name, description, system_prompt, tools } = req.body;
+  const id = Math.random().toString(36).substr(2, 9);
+
+  try {
+    await run(
+      'INSERT INTO specialists (id, name, description, system_prompt, tools) VALUES (?, ?, ?, ?, ?)',
+      [id, name, description, system_prompt, JSON.stringify(tools || [])]
+    );
+    const specialist = await get('SELECT * FROM specialists WHERE id = ?', [id]);
+    res.json(specialist);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- RUNNER PAYLOAD ENDPOINT ---
+
+app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
+  const taskId = req.params.id;
+
+  try {
+    // 1. Get task details
+    const task = await get('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    // 2. Get Agent (Identity) details
+    const agent = await get('SELECT name, system_prompt, model_config FROM users WHERE id = ? AND is_ai = 1', [task.agent_id || task.assignee_id]);
+    
+    // 3. Get Project details
+    const project = await get('SELECT name, repository_path, runner_token, global_rules FROM projects WHERE id = ?', [task.project_id]);
+
+    // 4. Get relevant specialists mentioned in task (simple regex for @Name)
+    const mentions = task.description.match(/@(\w+)/g) || [];
+    const specialistNames = mentions.map(m => m.substring(1));
+    
+    let specialists = [];
+    if (specialistNames.length > 0) {
+      const placeholders = specialistNames.map(() => '?').join(',');
+      specialists = await all(`SELECT name, system_prompt, tools FROM specialists WHERE name IN (${placeholders})`, specialistNames);
+    }
+
+    // 5. Get task history (comments)
+    const comments = await all('SELECT user_name, content, is_system, created_at FROM comments WHERE task_id = ? ORDER BY created_at ASC', [taskId]);
+
+    res.json({
+      task: {
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        priority: task.priority
+      },
+      identity: agent || { name: 'Generic Agent', system_prompt: 'You are a helpful assistant.' },
+      project: project || { name: 'Default', repository_path: process.cwd() },
+      specialists: specialists,
+      history: comments
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Log ingestion for runners
+app.post('/api/runner/logs', async (req, res) => {
+  const { taskId, chunk } = req.body;
+  if (taskId && chunk) {
+    // Broadcast log to the specific task room
+    io.emit(`task-logs-${taskId}`, { chunk, timestamp: new Date().toISOString() });
+  }
+  res.sendStatus(200);
+});
+
+// Runner heartbeat
+app.post('/api/runner/heartbeat', async (req, res) => {
+  const { runnerToken } = req.body;
+  if (runnerToken) {
+    await run('UPDATE projects SET last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?', [runnerToken]);
+  }
+  res.sendStatus(200);
+});
+
 // 404 handler - must be after all routes
 app.use(notFoundHandler);
 
 // Error handling middleware - must be last
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   logger.info(`🚀 Server running on http://localhost:${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });

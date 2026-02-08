@@ -4,12 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 interface HeaderProps {
-  onCreateTask: () => void;
+  action?: {
+    label: string;
+    onClick: () => void;
+    icon?: React.ReactNode;
+  };
   searchQuery: string;
   onSearchChange: (query: string) => void;
 }
 
-export function Header({ onCreateTask, searchQuery, onSearchChange }: HeaderProps) {
+export function Header({ action, searchQuery, onSearchChange }: HeaderProps) {
   return (
     <motion.header
       initial={{ y: -10, opacity: 0 }}
@@ -38,10 +42,12 @@ export function Header({ onCreateTask, searchQuery, onSearchChange }: HeaderProp
           <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full" />
         </Button>
         
-        <Button onClick={onCreateTask} className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground">
-          <Plus className="w-4 h-4" />
-          New Task
-        </Button>
+        {action && (
+          <Button onClick={action.onClick} className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground">
+            {action.icon || <Plus className="w-4 h-4" />}
+            {action.label}
+          </Button>
+        )}
       </div>
     </motion.header>
   );

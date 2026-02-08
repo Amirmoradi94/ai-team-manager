@@ -8,9 +8,14 @@ import { CreateTaskModal } from '@/components/Modals/CreateTaskModal';
 import { InviteModal } from '@/components/Modals/InviteModal';
 import { UserManagementModal } from '@/components/Modals/UserManagementModal';
 import { TaskDetailModal } from '@/components/Modals/TaskDetailModal';
+import { CreateProjectModal } from '@/components/Modals/CreateProjectModal';
+import { CreateAgentModal } from '@/components/Modals/CreateAgentModal';
+import { CreateSpecialistModal } from '@/components/Modals/CreateSpecialistModal';
 import { Task, Status } from '@/types/task';
 import { toast } from 'sonner';
 import { startOfWeek, endOfWeek, addWeeks, format } from 'date-fns';
+import { Button } from '@/components/ui/button';
+import { Terminal, Cpu, CheckSquare, Plus } from 'lucide-react';
 
 // Lazy load heavy components
 const WeeklyCalendar = lazy(() => import('@/components/Calendar').then(m => ({ default: m.WeeklyCalendar })));
@@ -27,6 +32,9 @@ const Index = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
+  const [isCreateSpecialistOpen, setIsCreateSpecialistOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [defaultStatus, setDefaultStatus] = useState<Status>('todo');
@@ -34,6 +42,9 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [scheduledTasks, setScheduledTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [agents, setAgents] = useState<any[]>([]);
+  const [specialists, setSpecialists] = useState<any[]>([]);
   const [defaultSchedule, setDefaultSchedule] = useState<{ date?: Date; time?: string }>({});
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
     return (localStorage.getItem('theme') as 'light' | 'dark' | 'system') || 'dark';
@@ -52,6 +63,9 @@ const Index = () => {
           await fetchCurrentUser(token);
           await fetchTasks(token);
           await fetchUsers(token);
+          await fetchProjects(token);
+          await fetchAgents(token);
+          await fetchSpecialists(token);
           setIsAuthenticated(true);
         } catch (e) {
           // Token invalid, clear it
@@ -72,6 +86,15 @@ const Index = () => {
       if (token) {
         fetchScheduledTasks(token, currentWeek);
       }
+    } else if (activeTab === 'projects') {
+      const token = localStorage.getItem('token');
+      if (token) fetchProjects(token);
+    } else if (activeTab === 'team') {
+      const token = localStorage.getItem('token');
+      if (token) fetchAgents(token);
+    } else if (activeTab === 'specialists') {
+      const token = localStorage.getItem('token');
+      if (token) fetchSpecialists(token);
     }
   }, [activeTab, currentWeek]);
 
@@ -160,6 +183,42 @@ const Index = () => {
         avatar: u.avatar || '/placeholder.svg'
       }));
       setTeamMembers(formattedUsers);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchProjects = async (token: string) => {
+    try {
+      const res = await fetch(`${API_URL}/projects`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setProjects(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchAgents = async (token: string) => {
+    try {
+      const res = await fetch(`${API_URL}/agents`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setAgents(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchSpecialists = async (token: string) => {
+    try {
+      const res = await fetch(`${API_URL}/specialists`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setSpecialists(data);
     } catch (e) {
       console.error(e);
     }
@@ -479,7 +538,13 @@ const Index = () => {
 
       <main className="flex-1 flex flex-col overflow-hidden">
         <Header
-          onCreateTask={() => setIsCreateModalOpen(true)}
+          action={
+            activeTab === 'dashboard' ? { label: 'New Task', onClick: () => setIsCreateModalOpen(true) } :
+            activeTab === 'projects' ? { label: 'New Project', onClick: () => setIsCreateProjectOpen(true) } :
+            activeTab === 'team' ? { label: 'New Agent', onClick: () => setIsCreateAgentOpen(true) } :
+            activeTab === 'specialists' ? { label: 'New Specialist', onClick: () => setIsCreateSpecialistOpen(true) } :
+            undefined
+          }
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
         />
@@ -517,6 +582,128 @@ const Index = () => {
                 />
               </motion.div>
             </>
+          )}
+
+          {activeTab === 'projects' && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-foreground">Projects</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {projects.map(project => {
+                  const isOnline = project.last_seen && (Date.now() - new Date(project.last_seen).getTime() < 60000);
+                  const connectCommand = `npx agent-runner connect --token=${project.runner_token} --url=${API_URL}`;
+                  
+                  return (
+                    <div key={project.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all group relative flex flex-col">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-lg font-semibold text-foreground group-hover:text-primary">{project.name}</h3>
+                        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${isOnline ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-success animate-pulse' : 'bg-muted-foreground'}`} />
+                          {isOnline ? 'Online' : 'Offline'}
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{project.description}</p>
+                      
+                      <div className="space-y-3 mt-auto">
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-secondary/50 p-2 rounded truncate">
+                          <Terminal className="w-3 h-3 text-primary" />
+                          <code className="truncate">{project.repository_path}</code>
+                        </div>
+
+                        <div className="bg-black/40 rounded-lg p-3 border border-white/5 group/cmd relative">
+                          <p className="text-[9px] text-muted-foreground mb-2 uppercase font-bold tracking-widest">Connect Command</p>
+                          <code className="text-[10px] text-primary block truncate font-mono">
+                            {connectCommand}
+                          </code>
+                          <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(connectCommand);
+                              toast.success('Command copied to clipboard');
+                            }}
+                            className="absolute top-2 right-2 p-1 rounded bg-secondary opacity-0 group-hover/cmd:opacity-100 transition-opacity"
+                          >
+                            <CheckSquare className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {projects.length === 0 && <p className="text-muted-foreground">No projects defined yet.</p>}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'team' && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-foreground">AI Team</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {agents.map(agent => (
+                  <div key={agent.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all">
+                    <div className="flex items-center gap-3 mb-4">
+                      <Avatar className="w-10 h-10 ring-2 ring-primary/20">
+                        <AvatarImage src={agent.avatar} />
+                        <AvatarFallback>{agent.name[0]}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <h3 className="font-semibold text-foreground">{agent.name}</h3>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase font-bold tracking-wider">
+                          {(() => {
+                            try {
+                              return JSON.parse(agent.model_config || '{}').provider || 'AI';
+                            } catch (e) {
+                              return 'AI';
+                            }
+                          })()}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-4 italic border-l-2 border-primary/30 pl-3 py-1">
+                      "{agent.system_prompt}"
+                    </p>
+                  </div>
+                ))}
+                {agents.length === 0 && <p className="text-muted-foreground">No AI agents defined yet.</p>}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'specialists' && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-foreground">Domain Specialists</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {specialists.map(spec => (
+                  <div key={spec.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-primary/10">
+                        <Cpu className="w-4 h-4 text-primary" />
+                      </div>
+                      <h3 className="font-semibold text-foreground">{spec.name}</h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-4 h-10 line-clamp-2">{spec.description}</p>
+                    <div className="flex flex-wrap gap-1.5 pt-4 border-t border-border/50">
+                      {(() => {
+                        try {
+                          return (JSON.parse(spec.tools || '[]')).map((tool: string) => (
+                            <span key={tool} className="text-[9px] px-2 py-0.5 rounded bg-secondary text-secondary-foreground border border-border uppercase font-bold">
+                              {tool.replace('_', ' ')}
+                            </span>
+                          ));
+                        } catch (e) {
+                          return null;
+                        }
+                      })()}
+                    </div>
+                  </div>
+                ))}
+                {specialists.length === 0 && <p className="text-muted-foreground">No specialists defined yet.</p>}
+              </div>
+            </motion.div>
           )}
 
           {activeTab === 'tasks' && (
@@ -598,6 +785,8 @@ const Index = () => {
         }}
         onSubmit={handleCreateTask}
         teamMembers={teamMembers}
+        projects={projects}
+        agents={agents}
         defaultStatus={defaultStatus}
         defaultSchedule={defaultSchedule}
         editingTask={editingTask}
@@ -606,6 +795,33 @@ const Index = () => {
       <InviteModal
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}
+      />
+
+      <CreateProjectModal
+        isOpen={isCreateProjectOpen}
+        onClose={() => setIsCreateProjectOpen(false)}
+        onSuccess={() => {
+          const token = localStorage.getItem('token');
+          if (token) fetchProjects(token);
+        }}
+      />
+
+      <CreateAgentModal
+        isOpen={isCreateAgentOpen}
+        onClose={() => setIsCreateAgentOpen(false)}
+        onSuccess={() => {
+          const token = localStorage.getItem('token');
+          if (token) fetchAgents(token);
+        }}
+      />
+
+      <CreateSpecialistModal
+        isOpen={isCreateSpecialistOpen}
+        onClose={() => setIsCreateSpecialistOpen(false)}
+        onSuccess={() => {
+          const token = localStorage.getItem('token');
+          if (token) fetchSpecialists(token);
+        }}
       />
 
       <UserManagementModal

@@ -1,0 +1,32 @@
+{
+  "name": "@ai-team/runner",
+  "version": "1.0.0",
+  "description": "Local execution runner for AI Team Manager. Supports Claude, Gemini, and Codex.",
+  "main": "agent-runner.js",
+  "bin": {
+    "agent-runner": "./bin/agent-runner.js"
+  },
+  "scripts": {
+    "start": "node agent-runner.js",
+    "connect": "node bin/agent-runner.js connect",
+    "dev": "node agent-runner.js"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "automation",
+    "claude",
+    "gemini",
+    "codex",
+    "runner"
+  ],
+  "author": "Amir Moradi",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^13.1.0",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1",
+    "node-fetch": "^2.7.0",
+    "socket.io-client": "^4.8.1"
+  }
+}

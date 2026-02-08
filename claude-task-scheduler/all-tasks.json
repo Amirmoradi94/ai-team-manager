@@ -1,0 +1,17 @@
+[
+  {
+    "id": "hza8t7fdg",
+    "title": "Claude Test Task",
+    "description": "",
+    "status": "todo",
+    "priority": "high",
+    "due_date": null,
+    "scheduled_date": "2026-02-07",
+    "scheduled_time": "10:00",
+    "assignee_id": "vr6yycu4w",
+    "created_by": "el5hy4zbb",
+    "created_at": "2026-02-06 07:07:20",
+    "assignee_name": "claude",
+    "creator_name": "Amir Moradi"
+  }
+]

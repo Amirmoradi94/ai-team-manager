@@ -1,0 +1,9 @@
+Task from Kanban Board:
+Title: Test Webhook
+Description: This is a test webhook from Task Manager settings.
+Priority: medium
+Status: todo
+
+
+Please analyze this task and complete it. If it's a coding task, implement the solution.
+If it requires research, provide findings. Update me on the progress.

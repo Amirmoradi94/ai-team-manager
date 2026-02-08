@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Kanban Board</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f5f6f8;
+      padding: 20px;
+    }
+    .login-container {
+      max-width: 400px;
+      margin: 100px auto;
+      background: white;
+      padding: 40px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .login-container h1 { margin-bottom: 30px; color: #333; }
+    input {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #0079bf;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover { background: #026aa7; }
+    .board {
+      display: none;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .board h1 { margin-bottom: 20px; color: #333; }
+    .columns {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .column {
+      background: #ebecf0;
+      border-radius: 8px;
+      padding: 15px;
+    }
+    .column-title {
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #172b4d;
+    }
+    .task-card {
+      background: white;
+      padding: 15px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      cursor: pointer;
+    }
+    .task-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    .task-title {
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: #172b4d;
+    }
+    .task-description {
+      font-size: 13px;
+      color: #5e6c84;
+      margin-bottom: 10px;
+    }
+    .task-meta {
+      display: flex;
+      gap: 10px;
+      font-size: 12px;
+    }
+    .priority {
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-weight: 500;
+    }
+    .priority.high { background: #ffebe6; color: #bf2600; }
+    .priority.medium { background: #fff4e6; color: #ff991f; }
+    .priority.low { background: #e3fcef; color: #006644; }
+    .assignee {
+      padding: 3px 8px;
+      background: #deebff;
+      color: #0052cc;
+      border-radius: 3px;
+      font-weight: 500;
+    }
+    .due-date {
+      padding: 3px 8px;
+      background: #f4f5f7;
+      color: #42526e;
+      border-radius: 3px;
+    }
+    .logout {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      padding: 8px 16px;
+      background: #f4f5f7;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container" id="login">
+    <h1>Kanban Login</h1>
+    <form onsubmit="login(event)">
+      <input type="email" name="email" placeholder="Email" required value="claude@example.com">
+      <input type="password" name="password" placeholder="Password" required value="password123">
+      <button type="submit">Login</button>
+    </form>
+  </div>
+
+  <div class="board" id="board">
+    <button class="logout" onclick="logout()">Logout</button>
+    <h1>My Kanban Board</h1>
+    <div class="columns">
+      <div class="column">
+        <div class="column-title">To Do</div>
+
+        <div class="task-card" data-task-id="task-1">
+          <div class="task-title">Implement user authentication</div>
+          <div class="task-description">Add JWT-based authentication to the API with login and register endpoints</div>
+          <div class="task-meta">
+            <span class="priority high">high</span>
+            <span class="assignee">Claude</span>
+            <span class="due-date">2026-02-10</span>
+          </div>
+        </div>
+
+        <div class="task-card" data-task-id="task-2">
+          <div class="task-title">Fix responsive layout on mobile</div>
+          <div class="task-description">The navigation menu breaks on screens smaller than 768px</div>
+          <div class="task-meta">
+            <span class="priority medium">medium</span>
+            <span class="assignee">Claude</span>
+            <span class="due-date">2026-02-08</span>
+          </div>
+        </div>
+
+        <div class="task-card" data-task-id="task-3">
+          <div class="task-title">Update documentation</div>
+          <div class="task-description">Add API documentation for all new endpoints</div>
+          <div class="task-meta">
+            <span class="priority low">low</span>
+            <span class="assignee">John</span>
+            <span class="due-date">2026-02-15</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="column">
+        <div class="column-title">In Progress</div>
+
+        <div class="task-card" data-task-id="task-4">
+          <div class="task-title">Optimize database queries</div>
+          <div class="task-description">Reduce load time on the dashboard by optimizing SQL queries</div>
+          <div class="task-meta">
+            <span class="priority high">high</span>
+            <span class="assignee">Claude</span>
+            <span class="due-date">2026-02-07</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="column">
+        <div class="column-title">Done</div>
+
+        <div class="task-card" data-task-id="task-5">
+          <div class="task-title">Setup CI/CD pipeline</div>
+          <div class="task-description">Configure GitHub Actions for automated testing and deployment</div>
+          <div class="task-meta">
+            <span class="priority medium">medium</span>
+            <span class="assignee">Sarah</span>
+            <span class="due-date">2026-02-05</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function login(event) {
+      event.preventDefault();
+      const form = event.target;
+      const email = form.email.value;
+      const password = form.password.value;
+
+      // Simple validation (in real app, this would hit an API)
+      if (email && password) {
+        document.getElementById('login').style.display = 'none';
+        document.getElementById('board').style.display = 'block';
+      }
+    }
+
+    function logout() {
+      document.getElementById('login').style.display = 'block';
+      document.getElementById('board').style.display = 'none';
+    }
+  </script>
+</body>
+</html>

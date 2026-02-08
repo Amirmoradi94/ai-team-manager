@@ -1,0 +1,26 @@
+{
+  "taskManagerAPI": {
+    "apiUrl": "http://localhost:3001/api",
+    "email": "claude@taskmanager.com",
+    "password": ".PX0UQUBN67Nme32",
+    "claudeAssignee": "Claude"
+  },
+  "schedule": {
+    "checkInterval": "*/30 * * * *",
+    "specificTasks": [
+      {
+        "name": "Weekly Report",
+        "cron": "0 10 * * 2",
+        "description": "Generate weekly report every Tuesday at 10 AM"
+      }
+    ]
+  },
+  "webhook": {
+    "port": 3002,
+    "secret": "claude-webhook-secret-2026",
+    "url": "http://localhost:3002/webhook/task-assigned"
+  },
+  "notifications": {
+    "email": "amir.94.eng@gmail.com"
+  }
+}

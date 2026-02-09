@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Cpu, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -6,11 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
+import { SpecialistTemplate } from '@/data/specialistTemplates';
 
 interface CreateSpecialistModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  template?: SpecialistTemplate | null;
 }
 
 const AVAILABLE_TOOLS = [
@@ -23,12 +25,28 @@ const AVAILABLE_TOOLS = [
 
 const API_URL = 'http://localhost:3001/api';
 
-export function CreateSpecialistModal({ isOpen, onClose, onSuccess }: CreateSpecialistModalProps) {
+export function CreateSpecialistModal({ isOpen, onClose, onSuccess, template }: CreateSpecialistModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [selectedTools, setSelectedTools] = useState<string[]>(['file_edit', 'terminal']);
   const [isSubmitting, setIsPosting] = useState(false);
+
+  // Pre-fill form when template is provided
+  useEffect(() => {
+    if (isOpen && template) {
+      setName(template.name);
+      setDescription(template.description);
+      setSystemPrompt(template.systemPrompt);
+      setSelectedTools(template.tools);
+    } else if (isOpen && !template) {
+      // Reset form when opening without template
+      setName('');
+      setDescription('');
+      setSystemPrompt('');
+      setSelectedTools(['file_edit', 'terminal']);
+    }
+  }, [isOpen, template]);
 
   const toggleTool = (toolId: string) => {
     setSelectedTools(prev => 
@@ -57,7 +75,7 @@ export function CreateSpecialistModal({ isOpen, onClose, onSuccess }: CreateSpec
       });
 
       if (res.ok) {
-        toast.success('Specialist defined successfully');
+        toast.success('Role added successfully');
         onSuccess();
         onClose();
         setName('');
@@ -97,7 +115,7 @@ export function CreateSpecialistModal({ isOpen, onClose, onSuccess }: CreateSpec
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
                   <Cpu className="w-5 h-5 text-primary" />
-                  Define Domain Specialist
+                  {template ? `Using Template: ${template.name}` : 'Define Role'}
                 </h2>
                 <button
                   onClick={onClose}
@@ -109,7 +127,7 @@ export function CreateSpecialistModal({ isOpen, onClose, onSuccess }: CreateSpec
 
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Specialist Name</label>
+                  <label className="block text-sm font-medium text-foreground mb-2">Role Name</label>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -124,17 +142,17 @@ export function CreateSpecialistModal({ isOpen, onClose, onSuccess }: CreateSpec
                   <Input
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="What is their primary role?"
+                    placeholder="What is their primary responsibility?"
                     className="bg-secondary border-0"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Specialist Instructions</label>
+                  <label className="block text-sm font-medium text-foreground mb-2">Role Instructions</label>
                   <Textarea
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
-                    placeholder="Provide specific instructions for this sub-agent persona..."
+                    placeholder="Provide specific instructions for this role..."
                     rows={4}
                     required
                     className="bg-secondary border-0 resize-none text-sm italic"
@@ -167,7 +185,7 @@ export function CreateSpecialistModal({ isOpen, onClose, onSuccess }: CreateSpec
                     Cancel
                   </Button>
                   <Button type="submit" disabled={isSubmitting} className="flex-1 bg-primary hover:bg-primary/90">
-                    {isSubmitting ? 'Defining...' : 'Define Specialist'}
+                    {isSubmitting ? 'Adding...' : 'Add Role'}
                   </Button>
                 </div>
               </form>

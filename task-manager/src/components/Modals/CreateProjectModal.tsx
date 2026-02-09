@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, FolderKanban, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,16 +10,31 @@ interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  editingProject?: any | null;
 }
 
 const API_URL = 'http://localhost:3001/api';
 
-export function CreateProjectModal({ isOpen, onClose, onSuccess }: CreateProjectModalProps) {
+export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject }: CreateProjectModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [repoPath, setRepoPath] = useState('');
   const [globalRules, setGlobalRules] = useState('');
   const [isSubmitting, setIsPosting] = useState(false);
+
+  useEffect(() => {
+    if (editingProject) {
+      setName(editingProject.name || '');
+      setDescription(editingProject.description || '');
+      setRepoPath(editingProject.repository_path || '');
+      setGlobalRules(editingProject.global_rules || '');
+    } else {
+      setName('');
+      setDescription('');
+      setRepoPath('');
+      setGlobalRules('');
+    }
+  }, [editingProject, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,8 +42,11 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess }: CreateProject
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/projects`, {
-        method: 'POST',
+      const url = editingProject ? `${API_URL}/projects/${editingProject.id}` : `${API_URL}/projects`;
+      const method = editingProject ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -42,16 +60,12 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess }: CreateProject
       });
 
       if (res.ok) {
-        toast.success('Project created successfully');
+        toast.success(editingProject ? 'Project updated' : 'Project created');
         onSuccess();
         onClose();
-        setName('');
-        setDescription('');
-        setRepoPath('');
-        setGlobalRules('');
       } else {
         const data = await res.json();
-        throw new Error(data.error || 'Failed to create project');
+        throw new Error(data.error || 'Failed to save project');
       }
     } catch (error: any) {
       toast.error(error.message);
@@ -82,7 +96,7 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess }: CreateProject
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
                   <FolderKanban className="w-5 h-5 text-primary" />
-                  Create New Project
+                  {editingProject ? 'Edit Project' : 'Create New Project'}
                 </h2>
                 <button
                   onClick={onClose}
@@ -148,7 +162,7 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess }: CreateProject
                     Cancel
                   </Button>
                   <Button type="submit" disabled={isSubmitting} className="flex-1 bg-primary hover:bg-primary/90">
-                    {isSubmitting ? 'Creating...' : 'Create Project'}
+                    {isSubmitting ? 'Saving...' : (editingProject ? 'Update Project' : 'Create Project')}
                   </Button>
                 </div>
               </form>

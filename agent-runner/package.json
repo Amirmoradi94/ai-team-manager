@@ -9,7 +9,9 @@
   "scripts": {
     "start": "node agent-runner.js",
     "connect": "node bin/agent-runner.js connect",
-    "dev": "node agent-runner.js"
+    "dev": "node agent-runner.js",
+    "postinstall": "node scripts/setup-service.js",
+    "preuninstall": "node scripts/remove-service.js"
   },
   "keywords": [
     "ai",

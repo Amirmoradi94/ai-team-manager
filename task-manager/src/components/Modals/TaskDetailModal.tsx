@@ -8,6 +8,7 @@ import { Task, Priority, Status } from '@/types/task';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
+import { io } from 'socket.io-client';
 
 interface Comment {
   id: string;
@@ -57,20 +58,22 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
     if (task && isOpen) {
       loadComments();
       
-      // Standard WebSocket for live logs (assuming server supports upgrade)
-      // Since I added Socket.io to the server, I should use Socket.io client
-      // But for this environment, I'll use a polling fallback or a mock for now
-      // to keep it functional without adding new npm packages
-      const pollLogs = setInterval(async () => {
-        if (task.status !== 'in-progress') {
-          clearInterval(pollLogs);
-          return;
-        }
-        // In a real app, Socket.io would be better. 
-        // Here we'll just keep the logs state until closed.
-      }, 3000);
+      // Initialize Socket.io connection
+      const socket = io('http://localhost:3001');
 
-      return () => clearInterval(pollLogs);
+      socket.on('connect', () => {
+        console.log('[Socket] Connected to backend');
+      });
+
+      // Listen for task logs
+      socket.on(`task-logs-${task.id}`, (data: { chunk: string; timestamp: string }) => {
+        setLiveLogs(prev => prev + data.chunk);
+      });
+
+      return () => {
+        socket.disconnect();
+        console.log('[Socket] Disconnected');
+      };
     } else {
       setLiveLogs('');
     }

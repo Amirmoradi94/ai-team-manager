@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
-  CheckSquare,
   Users,
   Settings,
   Plus,
@@ -10,36 +9,46 @@ import {
   Calendar,
   BarChart3,
   FolderKanban,
-  Bot,
-  Cpu,
-  Plug
+  Plug,
+  Trash2,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { User } from '@/types/task';
 
 interface SidebarProps {
-  currentUser: User;
+  currentUser: User | null;
   teamMembers: User[];
   onInvite: () => void;
   onManageUsers?: () => void;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
+  onDeleteMember?: (memberId: string) => void;
 }
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
   { icon: FolderKanban, label: 'Projects', id: 'projects' },
   { icon: Plug, label: 'Runner', id: 'runner' },
-  { icon: Bot, label: 'AI Team', id: 'team' },
-  { icon: Cpu, label: 'Specialists', id: 'specialists' },
+  { icon: Users, label: 'Teams', id: 'team' },
+  { icon: Zap, label: 'Team Roles', id: 'specialists' },
   { icon: Calendar, label: 'Calendar', id: 'calendar' },
   { icon: BarChart3, label: 'Analytics', id: 'analytics' },
   { icon: Settings, label: 'Settings', id: 'settings' },
 ];
 
-export function Sidebar({ currentUser, teamMembers, onInvite, onManageUsers, activeTab = 'dashboard', onTabChange }: SidebarProps) {
+export function Sidebar({
+  currentUser,
+  teamMembers,
+  onInvite,
+  activeTab = 'dashboard',
+  onTabChange,
+  onDeleteMember,
+}: SidebarProps) {
   const [localActiveTab, setLocalActiveTab] = useState(activeTab);
   const currentTab = onTabChange ? activeTab : localActiveTab;
+
+  // Filter out AI users from teamMembers (only show humans)
+  const humanMembers = teamMembers.filter(member => !member.is_ai);
 
   const handleTabClick = (tabId: string) => {
     if (onTabChange) {
@@ -96,71 +105,91 @@ export function Sidebar({ currentUser, teamMembers, onInvite, onManageUsers, act
           })}
         </div>
 
-        {/* Team Section */}
-        <div className="mt-8">
-          <div className="flex items-center justify-between mb-3 px-3">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        {/* Team Members Section (Humans Only) */}
+        <div className="mt-8 px-2">
+          <div className="flex items-center justify-between mb-2 px-2">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Users className="w-3 h-3" />
               Team Members
             </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={onInvite}
-                className="p-1 rounded hover:bg-sidebar-accent transition-colors text-muted-foreground hover:text-primary"
-                title="Invite team member"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-              {currentUser?.role === 'admin' && onManageUsers && (
-                <button
-                  onClick={onManageUsers}
-                  className="p-1 rounded hover:bg-sidebar-accent transition-colors text-muted-foreground hover:text-primary"
-                  title="Manage users"
-                >
-                  <Users className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+            <button
+              onClick={onInvite}
+              className="p-1 rounded hover:bg-sidebar-accent transition-colors text-muted-foreground hover:text-primary"
+              title="Invite team member"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
           </div>
-          
-          <div className="space-y-1">
-            {teamMembers.map((member) => (
-              <button
-                key={member.id}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-sidebar-accent transition-colors group"
-              >
-                <Avatar className="w-7 h-7">
-                  <AvatarImage src={member.avatar} alt={member.name} />
-                  <AvatarFallback className="text-xs bg-secondary">
-                    {member.name.split(' ').map(n => n[0]).join('')}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 text-left">
-                  <p className="text-sm text-sidebar-foreground group-hover:text-foreground transition-colors">
-                    {member.name}
-                  </p>
+
+          <div className="space-y-0">
+            {humanMembers.map((member, index) => {
+              const isLast = index === humanMembers.length - 1;
+              return (
+                <div key={member.id} className="flex items-center h-9">
+                  {/* Tree line */}
+                  <div className="flex flex-col items-center w-5 h-full relative flex-shrink-0">
+                    <div className={`absolute top-0 left-2 w-px h-1/2 bg-border ${index === 0 ? 'hidden' : ''}`} />
+                    <div className="absolute top-1/2 left-2 w-px h-1/2 bg-border" style={{ display: isLast ? 'none' : 'block' }} />
+                    <div className="absolute top-1/2 left-2 w-3 h-px bg-border" />
+                  </div>
+
+                  <div className="flex-1 flex items-center gap-2 py-1 px-2 rounded-md hover:bg-sidebar-accent transition-colors group">
+                    <Avatar className="w-6 h-6 flex-shrink-0">
+                      <AvatarImage src={member.avatar} alt={member.name} />
+                      <AvatarFallback className="text-[10px] bg-secondary">
+                        {member.name.split(' ').map(n => n[0]).join('')}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 text-left min-w-0">
+                      <p className="text-xs text-sidebar-foreground group-hover:text-foreground transition-colors truncate">
+                        {member.name}
+                      </p>
+                    </div>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${member.id === currentUser?.id ? 'bg-success' : 'bg-muted'}`} />
+
+                    {member.id !== currentUser?.id && onDeleteMember && (
+                      <button
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/20 transition-all flex-shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteMember(member.id);
+                        }}
+                        title="Remove member"
+                      >
+                        <Trash2 className="w-3 h-3 text-destructive" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <span className={`w-2 h-2 rounded-full ${member.id === '1' ? 'bg-success' : 'bg-muted'}`} />
-              </button>
-            ))}
+              );
+            })}
+            {humanMembers.length === 0 && (
+              <div className="flex items-center gap-0">
+                <div className="w-5" />
+                <p className="text-[10px] text-muted-foreground px-2 py-2">No members</p>
+              </div>
+            )}
           </div>
         </div>
       </nav>
 
       {/* User Profile */}
-      <div className="p-4 border-t border-sidebar-border">
-        <div className="flex items-center gap-3 px-3 py-2">
-          <Avatar className="w-9 h-9 ring-2 ring-primary/20">
-            <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-            <AvatarFallback>
-              {currentUser.name.split(' ').map(n => n[0]).join('')}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1">
-            <p className="text-sm font-medium text-foreground">{currentUser.name}</p>
-            <p className="text-xs text-muted-foreground">{currentUser.role}</p>
+      {currentUser && (
+        <div className="p-4 border-t border-sidebar-border">
+          <div className="flex items-center gap-3 px-3 py-2">
+            <Avatar className="w-9 h-9 ring-2 ring-primary/20">
+              <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
+              <AvatarFallback>
+                {currentUser.name.split(' ').map(n => n[0]).join('')}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground">{currentUser.name}</p>
+              <p className="text-xs text-muted-foreground">{currentUser.role}</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </motion.aside>
   );
 }

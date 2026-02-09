@@ -17,6 +17,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Priority, Status, User, Task } from '@/types/task';
 import { format } from 'date-fns';
 
+import { Users } from 'lucide-react';
+
 interface CreateTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -24,12 +26,13 @@ interface CreateTaskModalProps {
   teamMembers: User[];
   projects: any[];
   agents: any[];
+  teams: any[];
   defaultStatus?: Status;
   defaultSchedule?: { date?: Date; time?: string };
   editingTask?: Task | null;
 }
 
-export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projects, agents, defaultStatus = 'todo', defaultSchedule, editingTask }: CreateTaskModalProps) {
+export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projects, agents, teams, defaultStatus = 'todo', defaultSchedule, editingTask }: CreateTaskModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
@@ -37,6 +40,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
   const [assigneeId, setAssigneeId] = useState<string>('');
   const [projectId, setProjectId] = useState<string>('');
   const [agentId, setAgentId] = useState<string>('');
+  const [teamId, setTeamId] = useState<string>('');
   const [tags, setTags] = useState('');
   const [scheduledDate, setScheduledDate] = useState<Date | undefined>(undefined);
   const [scheduledTime, setScheduledTime] = useState<string>('');
@@ -58,6 +62,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
       assignee,
       project_id: projectId || undefined,
       agent_id: agentId || undefined,
+      team_id: teamId || undefined,
       tags: tags.split(',').map(t => t.trim()).filter(Boolean),
       scheduledDate,
       scheduledTime: scheduledTime || undefined,
@@ -71,6 +76,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
     setAssigneeId('');
     setProjectId('');
     setAgentId('');
+    setTeamId('');
     setTags('');
     setScheduledDate(undefined);
     setScheduledTime('');
@@ -190,26 +196,51 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
 
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Agent / Assignee
+                      Agent / Team / Assignee
                     </label>
-                    <Select value={agentId || assigneeId} onValueChange={(val) => {
+                    <Select value={agentId || teamId || assigneeId} onValueChange={(val) => {
+                      const isTeam = teams?.find(t => t.id === val);
                       const isAi = agents.find(a => a.id === val);
-                      if (isAi) {
+                      
+                      if (isTeam) {
+                        setTeamId(val);
+                        setAgentId('');
+                        setAssigneeId('');
+                      } else if (isAi) {
                         setAgentId(val);
+                        setTeamId('');
                         setAssigneeId('');
                       } else {
                         setAssigneeId(val);
                         setAgentId('');
+                        setTeamId('');
                       }
                     }}>
                       <SelectTrigger className="bg-secondary border-0">
-                        <SelectValue placeholder="Select agent..." />
+                        <SelectValue placeholder="Select assignee..." />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Unassigned</SelectItem>
+                        
+                        {teams && teams.length > 0 && (
+                          <>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">AI Teams</div>
+                            {teams.map((team) => (
+                              <SelectItem key={team.id} value={team.id}>
+                                <div className="flex items-center gap-2">
+                                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
+                                    <Users className="w-3 h-3 text-primary" />
+                                  </div>
+                                  <span>{team.name}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
+
                         {agents.length > 0 && (
                           <>
-                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">AI Agents</div>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">Individual Agents</div>
                             {agents.map((agent) => (
                               <SelectItem key={agent.id} value={agent.id}>
                                 <div className="flex items-center gap-2">
@@ -223,6 +254,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                             ))}
                           </>
                         )}
+                        
                         <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">Team Members</div>
                         {teamMembers.map((member) => (
                           <SelectItem key={member.id} value={member.id}>

@@ -39,9 +39,18 @@ program
     await fs.writeFile(configPath, JSON.stringify(currentConfig, null, 2));
     console.log('✅ Configuration saved.');
 
-    // 4. Start the Runner
-    console.log('🚀 Starting Agent Runner...');
+    // 4. Initialize Runner Brain & Project Contexts
+    console.log('📄 Initializing project manifest...');
     const runner = new AgentRunner(currentConfig);
+    try {
+      await runner.syncAllProjectEnvironments();
+      console.log('✅ Runner brain and project contexts synced.');
+    } catch (e) {
+      console.warn('⚠️  Could not initialize manifest: ' + e.message);
+    }
+
+    // 5. Start the Runner
+    console.log('🚀 Starting Agent Runner...');
     runner.start();
   });
 

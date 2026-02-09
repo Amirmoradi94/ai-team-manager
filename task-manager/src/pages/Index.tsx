@@ -9,14 +9,37 @@ import { InviteModal } from '@/components/Modals/InviteModal';
 import { UserManagementModal } from '@/components/Modals/UserManagementModal';
 import { TaskDetailModal } from '@/components/Modals/TaskDetailModal';
 import { CreateProjectModal } from '@/components/Modals/CreateProjectModal';
+import { CreateTeamModal } from '@/components/Modals/CreateTeamModal';
+import { TeamDetailModal } from '@/components/Modals/TeamDetailModal';
+import { AssignTeamsModal } from '@/components/Modals/AssignTeamsModal';
+import { AssignSpecialistsModal } from '@/components/Modals/AssignSpecialistsModal';
 import { CreateAgentModal } from '@/components/Modals/CreateAgentModal';
 import { CreateSpecialistModal } from '@/components/Modals/CreateSpecialistModal';
+import { SpecialistTemplatesModal } from '@/components/Modals/SpecialistTemplatesModal';
+import { SpecialistTemplate } from '@/data/specialistTemplates';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Task, Status } from '@/types/task';
 import { toast } from 'sonner';
 import { startOfWeek, endOfWeek, addWeeks, format } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Terminal, Cpu, CheckSquare, Plus, Bot, Pencil, Trash2 } from 'lucide-react';
+import { Terminal, Cpu, CheckSquare, Plus, Bot, Pencil, Trash2, Users, Shield } from 'lucide-react';
+import { capitalize } from '@/lib/utils';
 
 // Lazy load heavy components
 const WeeklyCalendar = lazy(() => import('@/components/Calendar').then(m => ({ default: m.WeeklyCalendar })));
@@ -35,8 +58,19 @@ const Index = () => {
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<any | null>(null);
+  const [projectAssigningTeams, setProjectAssigningTeams] = useState<any | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
+  const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
+  const [specialistToDelete, setSpecialistToDelete] = useState<string | null>(null);
   const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
+  const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
+  const [editingTeam, setEditingTeam] = useState<any | null>(null);
+  const [teamAssigningSpecialists, setTeamAssigningSpecialists] = useState<any | null>(null);
+  const [selectedTeamForDetail, setSelectedTeamForDetail] = useState<any | null>(null);
   const [isCreateSpecialistOpen, setIsCreateSpecialistOpen] = useState(false);
+  const [isSpecialistTemplatesOpen, setIsSpecialistTemplatesOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<SpecialistTemplate | null>(null);
   const [editingAgent, setEditingAgent] = useState<any>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -47,6 +81,7 @@ const Index = () => {
   const [scheduledTasks, setScheduledTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
+  const [teams, setTeams] = useState<any[]>([]);
   const [specialists, setSpecialists] = useState<any[]>([]);
   const [defaultSchedule, setDefaultSchedule] = useState<{ date?: Date; time?: string }>({});
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
@@ -68,6 +103,7 @@ const Index = () => {
           await fetchUsers(token);
           await fetchProjects(token);
           await fetchAgents(token);
+          await fetchTeams(token);
           await fetchSpecialists(token);
           setIsAuthenticated(true);
         } catch (e) {
@@ -94,7 +130,7 @@ const Index = () => {
       if (token) fetchProjects(token);
     } else if (activeTab === 'team') {
       const token = localStorage.getItem('token');
-      if (token) fetchAgents(token);
+      if (token) fetchTeams(token);
     } else if (activeTab === 'specialists') {
       const token = localStorage.getItem('token');
       if (token) fetchSpecialists(token);
@@ -215,6 +251,50 @@ const Index = () => {
     }
   };
 
+  const fetchTeams = async (token: string) => {
+    try {
+      const res = await fetch(`${API_URL}/teams`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setTeams(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleEditTeam = (team: any) => {
+    setEditingTeam(team);
+    setIsCreateTeamOpen(true);
+  };
+
+  const deleteTeam = (teamId: string) => {
+    setTeamToDelete(teamId);
+  };
+
+  const handleConfirmDeleteTeam = async () => {
+    if (!teamToDelete) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/teams/${teamToDelete}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        toast.success('Team deleted successfully');
+        fetchTeams(token!);
+      } else {
+        throw new Error('Failed to delete team');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete team');
+    } finally {
+      setTeamToDelete(null);
+    }
+  };
+
   const deleteAgent = async (agentId: string) => {
     if (!confirm('Are you sure you want to delete this AI agent? This action cannot be undone.')) {
       return;
@@ -248,6 +328,34 @@ const Index = () => {
       setSpecialists(data);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+
+  const deleteSpecialist = (id: string) => {
+    setSpecialistToDelete(id);
+  };
+
+  const handleConfirmDeleteSpecialist = async () => {
+    if (!specialistToDelete) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/specialists/${specialistToDelete}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        toast.success('Role deleted successfully');
+        fetchSpecialists(token!);
+      } else {
+        throw new Error('Failed to delete role');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete role');
+    } finally {
+      setSpecialistToDelete(null);
     }
   };
 
@@ -334,6 +442,8 @@ const Index = () => {
             priority: taskData.priority,
             due_date: taskData.dueDate,
             assignee_id: taskData.assignee?.id,
+            team_id: (taskData as any).team_id,
+            agent_id: (taskData as any).agent_id,
             scheduled_date: taskData.scheduledDate ? taskData.scheduledDate.toISOString().split('T')[0] : undefined,
             scheduled_time: taskData.scheduledTime
           })
@@ -362,6 +472,8 @@ const Index = () => {
             priority: taskData.priority,
             due_date: taskData.dueDate,
             assignee_id: taskData.assignee?.id,
+            team_id: (taskData as any).team_id,
+            agent_id: (taskData as any).agent_id,
             scheduled_date: taskData.scheduledDate ? taskData.scheduledDate.toISOString().split('T')[0] : undefined,
             scheduled_time: taskData.scheduledTime
           })
@@ -454,6 +566,39 @@ const Index = () => {
       toast.success('Task deleted');
     } catch (e) {
       toast.error('Failed to delete task');
+    }
+  };
+
+  const handleEditProject = (project: any) => {
+    setEditingProject(project);
+    setIsCreateProjectOpen(true);
+  };
+
+  const handleDeleteProject = (projectId: string) => {
+    setProjectToDelete(projectId); // Set the project to be deleted and open the AlertDialog
+  };
+
+  const handleConfirmDeleteProject = async () => {
+    if (!projectToDelete) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/projects/${projectToDelete}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        setProjects(prev => prev.filter(p => p.id !== projectToDelete));
+        fetchTasks(token!); // Also refresh tasks since they might have been deleted on cascade
+        toast.success('Project and associated tasks deleted');
+      } else {
+        throw new Error('Failed to delete project');
+      }
+    } catch (e) {
+      toast.error('Error deleting project');
+    } finally {
+      setProjectToDelete(null); // Close the AlertDialog
     }
   };
 
@@ -557,10 +702,26 @@ const Index = () => {
       <Sidebar
         currentUser={currentUser}
         teamMembers={teamMembers}
+        teams={teams}
+        specialists={specialists}
         onInvite={() => setIsInviteModalOpen(true)}
         onManageUsers={() => setIsUserManagementOpen(true)}
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        onDeleteMember={(memberId) => {
+          // TODO: Implement member deletion
+          toast.error('Member deletion not yet implemented');
+        }}
+        onDeleteTeam={deleteTeam}
+        onEditTeam={handleEditTeam}
+        onDeleteSpecialist={(specialistId) => {
+          // TODO: Implement specialist deletion
+          toast.error('Specialist deletion not yet implemented');
+        }}
+        onEditSpecialist={(specialist) => {
+          // TODO: Implement specialist editing
+          toast.error('Specialist editing not yet implemented');
+        }}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
@@ -568,8 +729,8 @@ const Index = () => {
           action={
             activeTab === 'dashboard' ? { label: 'New Task', onClick: () => setIsCreateModalOpen(true) } :
             activeTab === 'projects' ? { label: 'New Project', onClick: () => setIsCreateProjectOpen(true) } :
-            activeTab === 'team' ? { label: 'New Agent', onClick: () => setIsCreateAgentOpen(true) } :
-            activeTab === 'specialists' ? { label: 'New Specialist', onClick: () => setIsCreateSpecialistOpen(true) } :
+            activeTab === 'team' ? { label: 'Create Team', onClick: () => setIsCreateTeamOpen(true) } :
+            activeTab === 'specialists' ? { label: 'Add Role', onClick: () => setIsSpecialistTemplatesOpen(true) } :
             undefined
           }
           searchQuery={searchQuery}
@@ -616,29 +777,78 @@ const Index = () => {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-foreground">Projects</h2>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {projects.map(project => (
-                  <div key={project.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all group relative flex flex-col">
-                    <div className="mb-3">
-                      <h3 className="text-lg font-semibold text-foreground group-hover:text-primary transition-colors">{project.name}</h3>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{project.description}</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {projects.map(project => {
+                  const lastSeen = project.last_seen || project.creator_runner_last_seen;
+                  // SQLite uses YYYY-MM-DD HH:MM:SS in UTC. Append 'Z' and replace space with 'T' for reliable ISO parsing
+                  const isOnline = lastSeen && (Date.now() - new Date(lastSeen.replace(' ', 'T') + 'Z').getTime() < 60000);
+                  const connectCommand = `npx agent-runner connect --token=${project.runner_token} --url=${API_URL}`;
 
-                    <div className="space-y-3 mt-auto">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/50 p-2.5 rounded">
-                        <Terminal className="w-4 h-4 text-primary flex-shrink-0" />
-                        <code className="truncate">{project.repository_path}</code>
+                  return (
+                    <div key={project.id} className="glass-card p-4 border border-border hover:border-primary/50 transition-all group relative flex flex-col">
+                      {/* Action buttons - top right */}
+                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10">
+                        <button
+                          onClick={() => setProjectAssigningTeams(project)}
+                          className="p-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                          title="Assign teams"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleEditProject(project)}
+                          className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
+                          title="Edit project"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteProject(project.id)}
+                          className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
+                          title="Delete project"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
 
-                      {project.global_rules && (
-                        <div className="bg-primary/5 border border-primary/10 rounded-lg p-3">
-                          <p className="text-[10px] text-muted-foreground mb-1.5 uppercase font-bold tracking-wider">Global Rules</p>
-                          <p className="text-xs text-muted-foreground line-clamp-2 italic">{project.global_rules}</p>
+                      <div className="mb-2">
+                        <h3 className="text-xl font-semibold text-foreground group-hover:text-primary transition-colors pr-16">{capitalize(project.name)}</h3>
+                      </div>
+                      <h4 className="text-xs text-muted-foreground mb-1 uppercase font-bold tracking-wider">Project Overview</h4>
+                      <p className="text-base text-muted-foreground mb-3 line-clamp-2">{project.description}</p>
+
+                      <div className="space-y-2 mt-auto">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary/50 p-2.5 rounded">
+                          <Terminal className="w-4 h-4 text-primary flex-shrink-0" />
+                          <code className="truncate">{project.repository_path}</code>
                         </div>
-                      )}
+
+                        {project.global_rules && (
+                          <div className="bg-primary/5 border border-primary/10 rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground mb-1.5 uppercase font-bold tracking-wider">Global Rules</p>
+                            <p className="text-sm text-muted-foreground line-clamp-2 italic">{project.global_rules}</p>
+                          </div>
+                        )}
+
+                        {/* Assigned Teams Badges */}
+                        {project.teams && project.teams.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-2">
+                            {project.teams.map((team: any) => (
+                              <div
+                                key={team.id}
+                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+                                title={team.mission_statement || team.name}
+                              >
+                                <Users className="w-3 h-3" />
+                                {team.name}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {projects.length === 0 && <p className="text-muted-foreground">No projects defined yet.</p>}
               </div>
             </motion.div>
@@ -653,73 +863,104 @@ const Index = () => {
           {activeTab === 'team' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-foreground">AI Team</h2>
+                <h2 className="text-2xl font-bold text-foreground">Teams</h2>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {agents.map(agent => {
-                  const config = (() => {
-                    try {
-                      return JSON.parse(agent.model_config || '{}');
-                    } catch (e) {
-                      return {};
-                    }
-                  })();
-                  const provider = config.provider || 'AI';
-                  const model = config.model || '';
-
-                  return (
-                    <div key={agent.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all group hover:shadow-lg relative">
-                      {/* Edit/Delete Buttons */}
-                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                        <button
-                          onClick={() => {
-                            setEditingAgent(agent);
-                            setIsCreateAgentOpen(true);
-                          }}
-                          className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
-                          title="Edit agent"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => deleteAgent(agent.id)}
-                          className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
-                          title="Delete agent"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-3 mb-4">
-                        <Avatar className="w-12 h-12 ring-2 ring-primary/20 group-hover:ring-primary/40 transition-all">
-                          <AvatarImage src={agent.avatar} />
-                          <AvatarFallback className="bg-primary/10 text-primary font-bold">{agent.name[0]}</AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">{agent.name}</h3>
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase font-bold tracking-wide">
-                              {provider}
-                            </span>
-                            {model && (
-                              <span className="text-[10px] text-muted-foreground truncate">
-                                {model}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <p className="text-sm text-muted-foreground line-clamp-4 italic border-l-2 border-primary/30 pl-3 py-2 leading-relaxed">
-                        "{agent.system_prompt}"
-                      </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {teams.map(team => (
+                  <div
+                    key={team.id}
+                    onClick={() => setSelectedTeamForDetail(team)}
+                    className="glass-card p-4 border border-border hover:border-primary/50 transition-all group hover:shadow-lg relative cursor-pointer"
+                  >
+                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTeamAssigningSpecialists(team);
+                        }}
+                        className="p-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                        title="Assign AI specialists"
+                      >
+                        <Cpu className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditTeam(team);
+                        }}
+                        className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
+                        title="Edit team"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteTeam(team.id);
+                        }}
+                        className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
+                        title="Delete team"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  );
-                })}
-                {agents.length === 0 && (
+
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="p-3 rounded-full bg-primary/10 text-primary">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-xl font-semibold text-foreground group-hover:text-primary transition-colors truncate">{capitalize(team.name)}</h3>
+                      </div>
+                    </div>
+
+                    <p className="text-base text-muted-foreground line-clamp-2 mb-3 h-12">{team.mission_statement}</p>
+
+                    {/* Team Composition */}
+                    <div className="space-y-3 border-t border-border/50 pt-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+                            <Bot className="w-3.5 h-3.5 text-primary" />
+                          </div>
+                          <p className="text-sm font-medium text-foreground truncate">
+                            Lead: {team.lead?.name ? capitalize(team.lead.name) : 'Unassigned'}
+                          </p>
+                        </div>
+
+                        {team.specialists && team.specialists.length > 0 && (
+                          <div className="flex -space-x-2 overflow-hidden px-1">
+                            <TooltipProvider>
+                              {team.specialists.slice(0, 3).map((spec: any) => (
+                                <Tooltip key={spec.id}>
+                                  <TooltipTrigger asChild>
+                                    <div className="inline-flex items-center justify-center w-6 h-6 rounded-full border-2 border-background bg-sidebar-accent text-[10px] font-bold text-primary hover:bg-primary/20 transition-colors cursor-help">
+                                      {spec.name.charAt(0).toUpperCase()}
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs font-semibold">{capitalize(spec.name)}</p>
+                                    <p className="text-[10px] text-muted-foreground">{spec.description}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))}
+                              {team.specialists.length > 3 && (
+                                <div className="inline-flex items-center justify-center w-6 h-6 rounded-full border-2 border-background bg-muted text-[9px] font-bold text-muted-foreground">
+                                  +{team.specialists.length - 3}
+                                </div>
+                              )}
+                            </TooltipProvider>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {teams.length === 0 && (
                   <div className="col-span-full text-center py-12">
-                    <Bot className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
-                    <p className="text-muted-foreground">No AI agents defined yet.</p>
-                    <p className="text-sm text-muted-foreground/70 mt-1">Click "New Agent" to create your first AI team member</p>
+                    <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
+                    <p className="text-muted-foreground">No teams defined yet.</p>
+                    <p className="text-sm text-muted-foreground/70 mt-1">Click "Create Team" to define your first AI squad</p>
                   </div>
                 )}
               </div>
@@ -729,18 +970,27 @@ const Index = () => {
           {activeTab === 'specialists' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-foreground">Domain Specialists</h2>
+                <h2 className="text-2xl font-bold text-foreground">Team Roles</h2>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {specialists.map(spec => (
-                  <div key={spec.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all">
+                  <div key={spec.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all relative group">
+                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                      <button
+                        onClick={() => deleteSpecialist(spec.id)}
+                        className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
+                        title="Delete role"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                     <div className="flex items-center gap-2 mb-3">
                       <div className="p-1.5 rounded-lg bg-primary/10">
                         <Cpu className="w-4 h-4 text-primary" />
                       </div>
-                      <h3 className="font-semibold text-foreground">{spec.name}</h3>
+                      <h3 className="text-xl font-semibold text-foreground">{capitalize(spec.name)}</h3>
                     </div>
-                    <p className="text-sm text-muted-foreground mb-4 h-10 line-clamp-2">{spec.description}</p>
+                    <p className="text-base text-muted-foreground mb-4 h-12 line-clamp-2">{spec.description}</p>
                     <div className="flex flex-wrap gap-1.5 pt-4 border-t border-border/50">
                       {(() => {
                         try {
@@ -756,7 +1006,7 @@ const Index = () => {
                     </div>
                   </div>
                 ))}
-                {specialists.length === 0 && <p className="text-muted-foreground">No specialists defined yet.</p>}
+                {specialists.length === 0 && <p className="text-muted-foreground">No roles defined yet. Click "Add Role" to get started.</p>}
               </div>
             </motion.div>
           )}
@@ -842,6 +1092,7 @@ const Index = () => {
         teamMembers={teamMembers}
         projects={projects}
         agents={agents}
+        teams={teams}
         defaultStatus={defaultStatus}
         defaultSchedule={defaultSchedule}
         editingTask={editingTask}
@@ -854,7 +1105,21 @@ const Index = () => {
 
       <CreateProjectModal
         isOpen={isCreateProjectOpen}
-        onClose={() => setIsCreateProjectOpen(false)}
+        onClose={() => {
+          setIsCreateProjectOpen(false);
+          setEditingProject(null);
+        }}
+        onSuccess={() => {
+          const token = localStorage.getItem('token');
+          if (token) fetchProjects(token);
+        }}
+        editingProject={editingProject}
+      />
+
+      <AssignTeamsModal
+        project={projectAssigningTeams}
+        isOpen={!!projectAssigningTeams}
+        onClose={() => setProjectAssigningTeams(null)}
         onSuccess={() => {
           const token = localStorage.getItem('token');
           if (token) fetchProjects(token);
@@ -875,13 +1140,57 @@ const Index = () => {
         editingAgent={editingAgent}
       />
 
+      <CreateTeamModal
+        isOpen={isCreateTeamOpen}
+        onClose={() => {
+          setIsCreateTeamOpen(false);
+          setEditingTeam(null);
+        }}
+        onSuccess={() => {
+          const token = localStorage.getItem('token');
+          if (token) fetchTeams(token);
+          setEditingTeam(null);
+        }}
+        editingTeam={editingTeam}
+      />
+
+      <AssignSpecialistsModal
+        team={teamAssigningSpecialists}
+        isOpen={!!teamAssigningSpecialists}
+        onClose={() => setTeamAssigningSpecialists(null)}
+        onSuccess={() => {
+          const token = localStorage.getItem('token');
+          if (token) fetchTeams(token);
+        }}
+      />
+
+      <SpecialistTemplatesModal
+        isOpen={isSpecialistTemplatesOpen}
+        onClose={() => setIsSpecialistTemplatesOpen(false)}
+        onSelectTemplate={(template) => {
+          setSelectedTemplate(template);
+          setIsSpecialistTemplatesOpen(false);
+          setIsCreateSpecialistOpen(true);
+        }}
+        onCreateFromScratch={() => {
+          setSelectedTemplate(null);
+          setIsSpecialistTemplatesOpen(false);
+          setIsCreateSpecialistOpen(true);
+        }}
+      />
+
       <CreateSpecialistModal
         isOpen={isCreateSpecialistOpen}
-        onClose={() => setIsCreateSpecialistOpen(false)}
+        onClose={() => {
+          setIsCreateSpecialistOpen(false);
+          setSelectedTemplate(null);
+        }}
         onSuccess={() => {
           const token = localStorage.getItem('token');
           if (token) fetchSpecialists(token);
+          setSelectedTemplate(null);
         }}
+        template={selectedTemplate}
       />
 
       <UserManagementModal
@@ -902,6 +1211,67 @@ const Index = () => {
         onDelete={handleDeleteTask}
         onStatusChange={handleLocalTaskUpdate}
       />
+
+      <TeamDetailModal
+        team={selectedTeamForDetail}
+        isOpen={!!selectedTeamForDetail}
+        onClose={() => setSelectedTeamForDetail(null)}
+        onEdit={(team) => {
+          setSelectedTeamForDetail(null);
+          handleEditTeam(team);
+        }}
+      />
+
+      <AlertDialog open={!!projectToDelete} onOpenChange={(open) => !open && setProjectToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete your project and remove all associated tasks from our servers.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDeleteProject} className="bg-destructive hover:bg-destructive/90">
+              Delete Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!teamToDelete} onOpenChange={(open) => !open && setTeamToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete AI Team?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the team and its associated lead agent. Tasks currently assigned to this team will remain but will need reassignment.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDeleteTeam} className="bg-destructive hover:bg-destructive/90">
+              Delete Team
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!specialistToDelete} onOpenChange={(open) => !open && setSpecialistToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Team Role?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove this role from the global library and unassign it from all teams. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDeleteSpecialist} className="bg-destructive hover:bg-destructive/90">
+              Delete Role
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

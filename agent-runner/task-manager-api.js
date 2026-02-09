@@ -520,6 +520,39 @@ class TaskManagerAPI {
   }
 
   /**
+   * Get project and team info by runner token (for initial manifest sync)
+   * Optionally accepts a projectId to fetch a specific project's full payload
+   */
+  async getProjectInfo(token, projectId = null) {
+    try {
+      const url = projectId 
+        ? `${this.config.apiUrl}/runner/project?token=${token}&projectId=${projectId}`
+        : `${this.config.apiUrl}/runner/project?token=${token}`;
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Failed to fetch project info: ${response.statusText}`);
+      return response.json();
+    } catch (error) {
+      console.error(`[API] Error fetching project info:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all projects for a runner (Universal Runner)
+   */
+  async getRunnerProjects(runnerToken) {
+    try {
+      const response = await fetch(`${this.config.apiUrl}/runner/projects?token=${runnerToken}`);
+      if (!response.ok) throw new Error(`Failed to fetch runner projects: ${response.statusText}`);
+      return response.json();
+    } catch (error) {
+      console.error(`[API] Error fetching runner projects:`, error.message);
+      return [];
+    }
+  }
+
+  /**
    * Send log chunks to the Task Manager for real-time streaming
    */
   async sendRunnerLogs(taskId, chunk) {
@@ -537,12 +570,17 @@ class TaskManagerAPI {
    */
   async sendHeartbeat(runnerToken) {
     try {
-      await fetch(`${this.config.apiUrl}/runner/heartbeat`, {
+      const response = await fetch(`${this.config.apiUrl}/runner/heartbeat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: runnerToken })
       });
-    } catch (e) {}
+      if (!response.ok) {
+        console.error(`[Heartbeat] Failed: ${response.status} ${response.statusText}`);
+      }
+    } catch (e) {
+      console.error(`[Heartbeat] Error:`, e.message);
+    }
   }
 
   /**

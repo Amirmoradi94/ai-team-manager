@@ -237,6 +237,46 @@ db.serialize(() => {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // --- NEW TEAM ARCHITECTURE ---
+
+  // Create teams table
+  db.run(`CREATE TABLE IF NOT EXISTS teams (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    mission_statement TEXT,
+    project_id TEXT,
+    human_in_the_loop BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
+  )`);
+
+  // Link specialists to teams
+  db.run(`CREATE TABLE IF NOT EXISTS team_specialists (
+    team_id TEXT,
+    specialist_id TEXT,
+    PRIMARY KEY (team_id, specialist_id),
+    FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
+    FOREIGN KEY(specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
+  )`);
+
+  // Link teams to projects (Many-to-Many)
+  db.run(`CREATE TABLE IF NOT EXISTS project_teams (
+    project_id TEXT,
+    team_id TEXT,
+    PRIMARY KEY (project_id, team_id),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
+  )`);
+
+  // Add team columns to users (for Team Leads)
+  db.run(`ALTER TABLE users ADD COLUMN team_id TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN is_team_lead BOOLEAN DEFAULT 0`, () => {});
+
+  // Add team_id to tasks
+  db.run(`ALTER TABLE tasks ADD COLUMN team_id TEXT`, () => {});
+
+  // --- END NEW TEAM ARCHITECTURE ---
+
   // Add runner_token to projects
   db.run(`ALTER TABLE projects ADD COLUMN runner_token TEXT`, () => {});
   db.run(`ALTER TABLE projects ADD COLUMN last_seen DATETIME`, () => {});
@@ -363,6 +403,149 @@ const all = (sql, params = []) => new Promise((resolve, reject) => {
     else resolve(rows);
   });
 });
+
+// REMOVED: generateAITeamManifest function
+// Projects now use runner-centralized intelligence
+// All AI files are stored in ~/.agent_runner/, not in project folders
+// Projects only get lightweight .ai_task_context/ created by agent-runner
+
+// Helper function removed - kept comment for reference
+async function generateAITeamManifest_DEPRECATED(project, user) {
+  const fs = require('fs').promises;
+  const path = require('path');
+  const fsSync = require('fs');
+
+  try {
+    // Create agent_runner_internal/ main folder
+    const agentRunnerDir = path.join(project.repository_path, 'agent_runner_internal');
+    if (!fsSync.existsSync(agentRunnerDir)) {
+      fsSync.mkdirSync(agentRunnerDir, { recursive: true });
+    }
+
+    // Create organized subfolders
+    const configDir = path.join(agentRunnerDir, 'config');
+    const logsDir = path.join(agentRunnerDir, 'logs');
+    const historyDir = path.join(agentRunnerDir, 'history');
+
+    if (!fsSync.existsSync(configDir)) fsSync.mkdirSync(configDir, { recursive: true });
+    if (!fsSync.existsSync(logsDir)) fsSync.mkdirSync(logsDir, { recursive: true });
+    if (!fsSync.existsSync(historyDir)) fsSync.mkdirSync(historyDir, { recursive: true });
+
+    // Always ensure .gitignore exists in root
+    const gitignorePath = path.join(agentRunnerDir, '.gitignore');
+    if (!fsSync.existsSync(gitignorePath)) {
+      const gitignoreContent = `# Agent Runner Internal Files
+logs/
+*.log
+*.tmp
+.DS_Store
+`;
+      fsSync.writeFileSync(gitignorePath, gitignoreContent);
+    }
+
+    // AI_TEAM.md goes in the config/ subfolder
+    const manifestPath = path.join(configDir, 'AI_TEAM.md');
+
+    // Analyze project structure
+    let projectStructure = '';
+    let detectedTechnologies = [];
+
+    try {
+      const files = await fs.readdir(project.repository_path);
+
+      // Detect technologies based on config files
+      if (files.includes('package.json')) {
+        detectedTechnologies.push('Node.js/JavaScript');
+        try {
+          const packageJson = JSON.parse(await fs.readFile(path.join(project.repository_path, 'package.json'), 'utf8'));
+          if (packageJson.dependencies) {
+            if (packageJson.dependencies.react) detectedTechnologies.push('React');
+            if (packageJson.dependencies.vue) detectedTechnologies.push('Vue');
+            if (packageJson.dependencies.next) detectedTechnologies.push('Next.js');
+            if (packageJson.dependencies.express) detectedTechnologies.push('Express');
+            if (packageJson.dependencies.vite) detectedTechnologies.push('Vite');
+          }
+        } catch (e) {}
+      }
+      if (files.includes('requirements.txt') || files.includes('setup.py')) detectedTechnologies.push('Python');
+      if (files.includes('Gemfile')) detectedTechnologies.push('Ruby');
+      if (files.includes('go.mod')) detectedTechnologies.push('Go');
+      if (files.includes('Cargo.toml')) detectedTechnologies.push('Rust');
+      if (files.includes('pom.xml')) detectedTechnologies.push('Java/Maven');
+      if (files.includes('build.gradle')) detectedTechnologies.push('Java/Gradle');
+
+      // Build structure overview
+      projectStructure = '## Project Structure\n\n```\n';
+      const ignoreDirs = ['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', 'venv'];
+
+      for (const file of files.slice(0, 20)) { // Limit to first 20 items
+        if (ignoreDirs.includes(file)) continue;
+        const filePath = path.join(project.repository_path, file);
+        const stat = fsSync.statSync(filePath);
+        projectStructure += stat.isDirectory() ? `📁 ${file}/\n` : `📄 ${file}\n`;
+      }
+
+      if (files.length > 20) {
+        projectStructure += `... and ${files.length - 20} more items\n`;
+      }
+      projectStructure += '```\n\n';
+    } catch (e) {
+      projectStructure = '_(Project structure analysis unavailable)_\n\n';
+    }
+
+    // Get AI agents
+    const agents = await all('SELECT name, system_prompt FROM users WHERE is_ai = 1');
+
+    // Generate manifest content
+    let manifestContent = `# AI Team Manifest: ${project.name}\n\n`;
+    manifestContent += `> Auto-generated on ${new Date().toLocaleString()}\n\n`;
+    manifestContent += `## Project Overview\n\n`;
+    manifestContent += `${project.description || 'No description provided.'}\n\n`;
+
+    if (detectedTechnologies.length > 0) {
+      manifestContent += `**Detected Technologies:** ${detectedTechnologies.join(', ')}\n\n`;
+    }
+
+    manifestContent += projectStructure;
+
+    manifestContent += `## AI Team\n\n`;
+    if (agents.length > 0) {
+      agents.forEach(agent => {
+        manifestContent += `### ${agent.name}\n`;
+        manifestContent += `${agent.system_prompt}\n\n`;
+      });
+    } else {
+      manifestContent += `_No AI agents configured yet. Add agents in the AI Team tab._\n\n`;
+    }
+
+    manifestContent += `## Global Project Rules\n\n`;
+    manifestContent += `${project.global_rules || 'Follow best practices and write clean, maintainable code.'}\n\n`;
+
+    manifestContent += `## Important Notes for AI Agents\n\n`;
+    manifestContent += `- Always read this manifest before starting work on this project\n`;
+    manifestContent += `- Follow the project structure and conventions shown above\n`;
+    manifestContent += `- Respect the global rules at all times\n`;
+    manifestContent += `- When making changes, ensure they align with the detected technologies\n`;
+    manifestContent += `- Update this manifest if significant project changes occur\n\n`;
+
+    manifestContent += `## Work Journal\n\n`;
+    manifestContent += `_This section will be updated by AI agents as they complete tasks._\n\n`;
+    manifestContent += `- **${new Date().toLocaleDateString()}**: Project initialized in AI Team Manager\n\n`;
+    manifestContent += `---\n\n`;
+    manifestContent += `> **Note:** This file is located in \`agent_runner_internal/config/\` directory.\n`;
+    manifestContent += `> The \`agent_runner_internal/\` folder contains all agent-related files:\n`;
+    manifestContent += `> - \`config/\` - Configuration and manifest files\n`;
+    manifestContent += `> - \`logs/\` - Execution logs\n`;
+    manifestContent += `> - \`history/\` - Task execution history\n`;
+
+    // Write or update the manifest
+    await fs.writeFile(manifestPath, manifestContent, 'utf8');
+    logger.info(`✅ AI_TEAM.md generated for project: ${project.name} at ${manifestPath}`);
+
+  } catch (error) {
+    logger.error('Failed to generate AI_TEAM.md:', error);
+  }
+}
 
 // Auth Middleware
 const authenticateToken = (req, res, next) => {
@@ -594,15 +777,15 @@ app.get('/api/tasks/:id', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tasks', authenticateToken, validateCreateTask, async (req, res) => {
-  const { title, description, status, priority, due_date, assignee_id, scheduled_date, scheduled_time } = req.body;
+  const { title, description, status, priority, due_date, assignee_id, scheduled_date, scheduled_time, project_id, agent_id } = req.body;
   const id = Math.random().toString(36).substr(2, 9);
   const created_by = req.user.id;
 
   try {
     await run(
-      `INSERT INTO tasks (id, title, description, status, priority, due_date, assignee_id, created_by, scheduled_date, scheduled_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, title, description, status || 'todo', priority || 'medium', due_date, assignee_id, created_by, scheduled_date, scheduled_time]
+      `INSERT INTO tasks (id, title, description, status, priority, due_date, assignee_id, created_by, scheduled_date, scheduled_time, project_id, agent_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, title, description, status || 'todo', priority || 'medium', due_date, assignee_id, created_by, scheduled_date, scheduled_time, project_id, agent_id]
     );
     const newTask = await get(`
       SELECT t.*,
@@ -1195,7 +1378,25 @@ app.delete('/api/settings/:key', authenticateToken, requireAdmin, async (req, re
 
 app.get('/api/projects', authenticateToken, async (req, res) => {
   try {
-    const projects = await all('SELECT * FROM projects ORDER BY created_at DESC');
+    // Join with users to get the creator's runner_last_seen as a fallback
+    const projects = await all(`
+      SELECT p.*, u.runner_last_seen as creator_runner_last_seen
+      FROM projects p
+      LEFT JOIN users u ON p.created_by = u.id
+      ORDER BY p.created_at DESC
+    `);
+
+    // Fetch teams for each project
+    for (const project of projects) {
+      const teams = await all(`
+        SELECT t.*
+        FROM teams t
+        INNER JOIN project_teams pt ON t.id = pt.team_id
+        WHERE pt.project_id = ?
+      `, [project.id]);
+      project.teams = teams;
+    }
+
     res.json(projects);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1203,18 +1404,161 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/projects', authenticateToken, async (req, res) => {
-  const { name, description, repository_path, global_rules } = req.body;
+  const { name, description, repository_path, global_rules, team_ids } = req.body;
   const id = Math.random().toString(36).substr(2, 9);
   const runner_token = Math.random().toString(36).substr(2, 15); // Simple token
 
   try {
+    // Create project folder immediately if repository_path is provided
+    if (repository_path) {
+      const fs = require('fs');
+
+      // Create the directory if it doesn't exist
+      if (!fs.existsSync(repository_path)) {
+        fs.mkdirSync(repository_path, { recursive: true });
+        logger.info(`Created project directory: ${repository_path}`);
+      }
+    }
+
+    // Create the project record
     await run(
       'INSERT INTO projects (id, name, description, repository_path, global_rules, runner_token, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [id, name, description, repository_path, global_rules, runner_token, req.user.id]
     );
+
+    // Assign teams to project (many-to-many)
+    if (team_ids && Array.isArray(team_ids) && team_ids.length > 0) {
+      for (const team_id of team_ids) {
+        await run(
+          'INSERT INTO project_teams (project_id, team_id) VALUES (?, ?)',
+          [id, team_id]
+        );
+      }
+    }
+
     const project = await get('SELECT * FROM projects WHERE id = ?', [id]);
+    logger.info(`Project created: ${name} with ${team_ids?.length || 0} teams. Agent-runner will create .ai_task_context/ on next sync.`);
+
     res.json(project);
   } catch (err) {
+    logger.error('Failed to create project:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/projects/:id', authenticateToken, async (req, res) => {
+  const { name, description, repository_path, global_rules } = req.body;
+  const { id } = req.params;
+
+  try {
+    // If repository_path is being updated, create folder
+    if (repository_path) {
+      const fs = require('fs');
+
+      // Create the directory if it doesn't exist
+      if (!fs.existsSync(repository_path)) {
+        fs.mkdirSync(repository_path, { recursive: true });
+        logger.info(`Created project directory: ${repository_path}`);
+      }
+    }
+
+    await run(
+      `UPDATE projects SET
+        name = COALESCE(?, name),
+        description = COALESCE(?, description),
+        repository_path = COALESCE(?, repository_path),
+        global_rules = COALESCE(?, global_rules)
+       WHERE id = ?`,
+      [name, description, repository_path, global_rules, id]
+    );
+    const updated = await get('SELECT * FROM projects WHERE id = ?', [id]);
+    logger.info(`Project updated: ${updated.name}. Agent-runner will sync .ai_task_context/ on next cycle.`);
+
+    res.json(updated);
+  } catch (err) {
+    logger.error('Failed to update project:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/projects/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 1. Delete all tasks associated with this project
+    await run('DELETE FROM tasks WHERE project_id = ?', [id]);
+
+    // 2. Delete project-team assignments
+    await run('DELETE FROM project_teams WHERE project_id = ?', [id]);
+
+    // 3. Delete the project
+    await run('DELETE FROM projects WHERE id = ?', [id]);
+
+    res.json({ success: true, message: 'Project and associated tasks deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Assign team to project
+app.post('/api/projects/:id/teams/:teamId', authenticateToken, async (req, res) => {
+  const { id, teamId } = req.params;
+
+  try {
+    // Check if already assigned
+    const existing = await get(
+      'SELECT * FROM project_teams WHERE project_id = ? AND team_id = ?',
+      [id, teamId]
+    );
+
+    if (existing) {
+      return res.status(400).json({ error: 'Team already assigned to this project' });
+    }
+
+    await run(
+      'INSERT INTO project_teams (project_id, team_id) VALUES (?, ?)',
+      [id, teamId]
+    );
+
+    res.json({ success: true, message: 'Team assigned to project' });
+  } catch (err) {
+    logger.error('Failed to assign team to project:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Remove team from project
+app.delete('/api/projects/:id/teams/:teamId', authenticateToken, async (req, res) => {
+  const { id, teamId } = req.params;
+
+  try {
+    await run(
+      'DELETE FROM project_teams WHERE project_id = ? AND team_id = ?',
+      [id, teamId]
+    );
+
+    res.json({ success: true, message: 'Team removed from project' });
+  } catch (err) {
+    logger.error('Failed to remove team from project:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get teams assigned to a project
+app.get('/api/projects/:id/teams', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const teams = await all(`
+      SELECT t.*, pt.created_at as assigned_at
+      FROM teams t
+      INNER JOIN project_teams pt ON t.id = pt.team_id
+      WHERE pt.project_id = ?
+    `, [id]);
+
+    res.json(teams);
+  } catch (err) {
+    logger.error('Failed to get project teams:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1264,27 +1608,86 @@ app.get('/api/runner/status', authenticateToken, async (req, res) => {
   }
 });
 
-// Runner heartbeat endpoint (called by agent-runner)
-app.post('/api/runner/heartbeat', async (req, res) => {
-  const { token } = req.body;
-
-  if (!token) {
-    return res.status(400).json({ error: 'Runner token required' });
-  }
+// Get project info by runner token (for initial sync) - supports both project and user tokens
+app.get('/api/runner/project', async (req, res) => {
+  const { token, projectId } = req.query;
+  if (!token) return res.status(400).json({ error: 'Token required' });
 
   try {
-    const result = await run(
-      'UPDATE users SET runner_last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?',
-      [token]
-    );
+    let project = null;
+    let userId = null;
 
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Invalid runner token' });
+    if (projectId) {
+      project = await get('SELECT * FROM projects WHERE id = ?', [projectId]);
+    } else {
+      // First, try to find project by project-specific token
+      project = await get('SELECT * FROM projects WHERE runner_token = ?', [token]);
+
+      // If not found, try to find user by user-level token and get their first project
+      if (!project) {
+        const user = await get('SELECT id FROM users WHERE runner_token = ?', [token]);
+        if (user) {
+          userId = user.id;
+          project = await get(`
+            SELECT * FROM projects WHERE created_by = ?
+            OR id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+            LIMIT 1
+          `, [userId, userId]);
+        }
+      }
     }
 
-    res.json({ success: true });
+    // If still no project found, return a default template
+    if (!project) {
+      project = {
+        name: 'Default Project',
+        description: 'No project configured yet. Create a project in the UI.',
+        repository_path: process.cwd(),
+        global_rules: 'Follow best practices and write clean code.'
+      };
+    }
+    
+    // Get teams assigned to this project (many-to-many), enriched with their leads and specialists
+    let teams = [];
+
+    if (project && project.id) {
+      const projectTeams = await all(`
+        SELECT t.* FROM teams t
+        INNER JOIN project_teams pt ON t.id = pt.team_id
+        WHERE pt.project_id = ?
+      `, [project.id]);
+
+      teams = await Promise.all(projectTeams.map(async (t) => {
+        const lead = await get('SELECT name, system_prompt, model_config FROM users WHERE team_id = ? AND is_team_lead = 1', [t.id]);
+        const teamSpecs = await all(`
+          SELECT s.name, s.description, s.system_prompt, s.tools
+          FROM specialists s
+          JOIN team_specialists ts ON s.id = ts.specialist_id
+          WHERE ts.team_id = ?
+        `, [t.id]);
+
+        return {
+          ...t,
+          lead: lead || { name: 'Lead Agent', system_prompt: 'Primary project orchestrator.' },
+          specialists: teamSpecs || []
+        };
+      }));
+    }
+
+    // Fetch all global specialists for the global directory
+    const allSpecialists = await all('SELECT name, description, system_prompt, tools FROM specialists');
+
+    res.json({
+      project,
+      teams: teams.length > 0 ? teams : [{ 
+        name: 'General', 
+        mission_statement: 'Global project execution.',
+        lead: { name: 'Lead Agent', system_prompt: 'Primary project orchestrator.' },
+        specialists: []
+      }],
+      allSpecialists
+    });
   } catch (err) {
-    logger.error('Runner heartbeat failed:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1298,7 +1701,33 @@ app.get('/api/runner/tasks', async (req, res) => {
   }
 
   try {
-    // Find user by runner token
+    // 1. First, check if this is a project-specific runner token
+    const projectByToken = await get('SELECT id FROM projects WHERE runner_token = ?', [token]);
+    
+    if (projectByToken) {
+      // Return tasks for this specific project
+      const tasks = await all(`
+        SELECT
+          t.*,
+          p.id as project_id,
+          p.name as project_name,
+          p.repository_path as project_repository_path,
+          p.global_rules as project_global_rules,
+          u.name as assignee_name,
+          c.name as creator_name
+        FROM tasks t
+        LEFT JOIN projects p ON t.project_id = p.id
+        LEFT JOIN users u ON t.assignee_id = u.id
+        LEFT JOIN users c ON t.created_by = c.id
+        WHERE t.project_id = ?
+        AND t.status = 'todo'
+        ORDER BY t.created_at ASC
+      `, [projectByToken.id]);
+      
+      return res.json(tasks);
+    }
+
+    // 2. Fallback: check if this is a user-wide runner token
     const user = await get('SELECT id FROM users WHERE runner_token = ?', [token]);
 
     if (!user) {
@@ -1307,7 +1736,7 @@ app.get('/api/runner/tasks', async (req, res) => {
 
     // Get all projects the user has access to
     const projects = await all(`
-      SELECT p.* FROM projects p
+      SELECT p.id FROM projects p
       WHERE p.created_by = ?
       OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
     `, [user.id, user.id]);
@@ -1318,7 +1747,7 @@ app.get('/api/runner/tasks', async (req, res) => {
       return res.json([]);
     }
 
-    // Get all pending tasks for these projects with full context
+    // Get all pending tasks for these projects
     const placeholders = projectIds.map(() => '?').join(',');
     const tasks = await all(`
       SELECT
@@ -1341,6 +1770,298 @@ app.get('/api/runner/tasks', async (req, res) => {
     res.json(tasks);
   } catch (err) {
     logger.error('Failed to fetch runner tasks:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- AI UTILS ROUTES ---
+
+app.post('/api/ai/enhance', authenticateToken, async (req, res) => {
+  const { text, type } = req.body;
+  if (!text) return res.status(400).json({ error: 'Text is required' });
+
+  // Check if OpenAI API key is configured
+  if (!process.env.OPENAI_API_KEY) {
+    logger.warn('OpenAI API key not configured');
+    return res.status(503).json({
+      error: 'AI Enhancement is not configured. Please set OPENAI_API_KEY in .env file.'
+    });
+  }
+
+  try {
+    const OpenAI = require('openai');
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    const systemPrompt = type === 'mission'
+      ? "You are a senior product strategist. Transform raw text into a professional, concise, and high-impact Team Mission Statement. Focus on strategic goals and measurable success."
+      : "You are an expert prompt engineer. Transform raw text into a professional AI System Prompt. Define a clear persona, tone, technical expertise, and operational rules.";
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Enhance this text: "${text}"` }
+      ],
+      temperature: 0.7,
+    });
+
+    const enhanced = response.choices[0].message.content.trim();
+    res.json({ enhanced });
+  } catch (err) {
+    logger.error('OpenAI Enhancement failed:', err);
+    res.status(500).json({ error: 'AI Enhancement failed. Check OpenAI API key.' });
+  }
+});
+
+// Test endpoint
+app.get('/api/ai/test', (req, res) => {
+  res.json({ message: 'AI routes are working!' });
+});
+
+app.post('/api/ai/recommendations', authenticateToken, async (req, res) => {
+  const { goal, specialists } = req.body;
+  if (!goal) return res.status(400).json({ error: 'Goal is required' });
+  if (!specialists || !Array.isArray(specialists)) {
+    return res.status(400).json({ error: 'Specialists array is required' });
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    logger.warn('OpenAI API key not configured');
+    return res.status(503).json({
+      error: 'AI Recommendations not configured. Please set OPENAI_API_KEY in .env file.'
+    });
+  }
+
+  try {
+    const OpenAI = require('openai');
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    const specialistsList = specialists.map(s =>
+      `${s.id}: ${s.name} - ${s.description} (Category: ${s.category})`
+    ).join('\n');
+
+    const systemPrompt = `You are an expert team composition strategist. Based on the user's goal, recommend the optimal specialists from the available list.
+
+Analyze the goal and recommend 3-8 specialists that would work best together without role conflicts.
+
+Return ONLY a JSON object (no markdown, no code blocks) with this structure:
+{
+  "recommendedIds": ["specialist-id-1", "specialist-id-2", ...],
+  "reasoning": "Brief explanation of why these specialists work well together for this goal"
+}`;
+
+    const userPrompt = `Goal: ${goal}
+
+Available Specialists:
+${specialistsList}
+
+Recommend the optimal team composition.`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.7,
+    });
+
+    const content = response.choices[0].message.content.trim();
+
+    let recommendations;
+    try {
+      recommendations = JSON.parse(content);
+    } catch (parseErr) {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        recommendations = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('Failed to parse AI response');
+      }
+    }
+
+    res.json(recommendations);
+  } catch (err) {
+    logger.error('AI Recommendations failed:', err);
+    res.status(500).json({ error: 'AI Recommendations failed. Please try again.' });
+  }
+});
+
+// --- TEAMS ROUTES ---
+
+app.get('/api/teams', authenticateToken, async (req, res) => {
+  try {
+    const teams = await all('SELECT * FROM teams ORDER BY created_at DESC');
+
+    // Enrich teams with their Lead and Specialists
+    const detailedTeams = await Promise.all(teams.map(async (team) => {
+      // 1. Get Team Lead
+      const lead = await get('SELECT * FROM users WHERE team_id = ? AND is_team_lead = 1', [team.id]);
+      
+      // 2. Get Specialists
+      const specialists = await all(`
+        SELECT s.* FROM specialists s
+        JOIN team_specialists ts ON s.id = ts.specialist_id
+        WHERE ts.team_id = ?
+      `, [team.id]);
+
+      // 3. Get Project Name
+      const project = team.project_id ? await get('SELECT name FROM projects WHERE id = ?', [team.project_id]) : null;
+
+      return {
+        ...team,
+        lead: lead || null,
+        specialists: specialists || [],
+        project_name: project ? project.name : null
+      };
+    }));
+
+    res.json(detailedTeams);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/teams', authenticateToken, async (req, res) => {
+  const { 
+    name, 
+    mission_statement, 
+    project_id, 
+    human_in_the_loop,
+    lead, // { name, system_prompt, model_config }
+    specialist_ids // Array of strings
+  } = req.body;
+
+  const teamId = Math.random().toString(36).substr(2, 9);
+
+  try {
+    // 1. Create Team
+    await run(
+      `INSERT INTO teams (id, name, mission_statement, project_id, human_in_the_loop) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [teamId, name, mission_statement, project_id, human_in_the_loop ? 1 : 0]
+    );
+
+    // 2. Create/Assign Team Lead
+    if (lead) {
+      const leadId = Math.random().toString(36).substr(2, 9);
+      const email = `${lead.name.toLowerCase().replace(/\s+/g, '.')}_lead@taskmanager.com`;
+      const avatar = '/claude-profile.png'; // Default AI avatar
+
+      // Check if this "user" already exists (by email/name) to avoid duplicates, or just create new
+      // For simplicity, we create a new agent user for this specific team role
+      await run(
+        `INSERT INTO users (id, name, email, avatar, role, is_ai, system_prompt, model_config, team_id, is_team_lead) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          leadId, 
+          lead.name, 
+          email, 
+          avatar, 
+          'member', 
+          1, // is_ai
+          lead.system_prompt, 
+          JSON.stringify(lead.model_config || { provider: 'claude', model: 'sonnet' }),
+          teamId,
+          1 // is_team_lead
+        ]
+      );
+    }
+
+    // 3. Link Specialists
+    if (specialist_ids && Array.isArray(specialist_ids)) {
+      for (const specId of specialist_ids) {
+        await run(
+          'INSERT INTO team_specialists (team_id, specialist_id) VALUES (?, ?)',
+          [teamId, specId]
+        );
+      }
+    }
+
+    // Return the full team object
+    const newTeam = await get('SELECT * FROM teams WHERE id = ?', [teamId]);
+    // (Ideally we'd fetch the enriched object like in GET, but basic is fine for now)
+    
+    res.json(newTeam);
+  } catch (err) {
+    logger.error('Failed to create team:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/teams/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { 
+    name, 
+    mission_statement, 
+    human_in_the_loop,
+    lead, // { name, provider, system_prompt }
+    specialist_ids 
+  } = req.body;
+
+  try {
+    // 1. Update Team Details
+    await run(
+      `UPDATE teams SET 
+        name = COALESCE(?, name),
+        mission_statement = COALESCE(?, mission_statement),
+        human_in_the_loop = COALESCE(?, human_in_the_loop)
+       WHERE id = ?`,
+      [name, mission_statement, human_in_the_loop ? 1 : 0, id]
+    );
+
+    // 2. Update Team Lead (User)
+    if (lead) {
+      await run(
+        `UPDATE users SET 
+          name = COALESCE(?, name),
+          system_prompt = COALESCE(?, system_prompt),
+          model_config = COALESCE(?, model_config)
+         WHERE team_id = ? AND is_team_lead = 1`,
+        [
+          lead.name,
+          lead.system_prompt,
+          JSON.stringify({ provider: lead.provider || 'claude', model: 'sonnet' }),
+          id
+        ]
+      );
+    }
+
+    // 3. Update Specialists (Unlink all, then Link new)
+    if (specialist_ids && Array.isArray(specialist_ids)) {
+      await run('DELETE FROM team_specialists WHERE team_id = ?', [id]);
+      for (const specId of specialist_ids) {
+        await run(
+          'INSERT INTO team_specialists (team_id, specialist_id) VALUES (?, ?)',
+          [id, specId]
+        );
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Failed to update team:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/teams/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 1. Delete Team Lead (Agent)
+    const leadResult = await db.run('DELETE FROM users WHERE team_id = ? AND is_team_lead = 1', [id]);
+    logger.info(`Deleted ${leadResult.changes || 0} team lead(s) for team ${id}`);
+
+    // 2. Unlink Specialists (Cascade handles this usually, but good to be safe)
+    await run('DELETE FROM team_specialists WHERE team_id = ?', [id]);
+
+    // 3. Delete Team
+    await run('DELETE FROM teams WHERE id = ?', [id]);
+
+    res.json({ success: true, message: 'Team deleted' });
+  } catch (err) {
+    logger.error('Failed to delete team:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1461,7 +2182,7 @@ app.post('/api/specialists', authenticateToken, async (req, res) => {
   }
 });
 
-// --- RUNNER PAYLOAD ENDPOINT ---
+  // --- RUNNER PAYLOAD ENDPOINT ---
 
 app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
   const taskId = req.params.id;
@@ -1472,20 +2193,35 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
     // 2. Get Agent (Identity) details
-    const agent = await get('SELECT name, system_prompt, model_config FROM users WHERE id = ? AND is_ai = 1', [task.agent_id || task.assignee_id]);
+    let agent = null;
+    let specialists = [];
+    let team = null;
+
+    if (task.team_id) {
+      // If assigned to a team, get the Team Lead
+      agent = await get('SELECT name, system_prompt, model_config FROM users WHERE team_id = ? AND is_team_lead = 1', [task.team_id]);
+      
+      // Get Team Details
+      team = await get('SELECT name, mission_statement, human_in_the_loop FROM teams WHERE id = ?', [task.team_id]);
+
+      // Get Team Specialists
+      specialists = await all(`
+        SELECT s.name, s.description, s.system_prompt, s.tools 
+        FROM specialists s
+        JOIN team_specialists ts ON s.id = ts.specialist_id
+        WHERE ts.team_id = ?
+      `, [task.team_id]);
+    } else {
+      // Fallback to direct agent assignment
+      agent = await get('SELECT name, system_prompt, model_config FROM users WHERE id = ? AND is_ai = 1', [task.agent_id || task.assignee_id]);
+      // For now, fallback to all specialists if not team-bound (or change to none)
+      specialists = await all('SELECT name, description, system_prompt, tools FROM specialists');
+    }
     
     // 3. Get Project details
-    const project = await get('SELECT name, repository_path, runner_token, global_rules FROM projects WHERE id = ?', [task.project_id]);
+    const project = await get('SELECT name, description, repository_path, runner_token, global_rules FROM projects WHERE id = ?', [task.project_id]);
 
-    // 4. Get relevant specialists mentioned in task (simple regex for @Name)
-    const mentions = task.description.match(/@(\w+)/g) || [];
-    const specialistNames = mentions.map(m => m.substring(1));
-    
-    let specialists = [];
-    if (specialistNames.length > 0) {
-      const placeholders = specialistNames.map(() => '?').join(',');
-      specialists = await all(`SELECT name, system_prompt, tools FROM specialists WHERE name IN (${placeholders})`, specialistNames);
-    }
+    // 4. (Already fetched specialists above)
 
     // 5. Get task history (comments)
     const comments = await all('SELECT user_name, content, is_system, created_at FROM comments WHERE task_id = ? ORDER BY created_at ASC', [taskId]);
@@ -1498,7 +2234,8 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
         priority: task.priority
       },
       identity: agent || { name: 'Generic Agent', system_prompt: 'You are a helpful assistant.' },
-      project: project || { name: 'Default', repository_path: process.cwd() },
+      team: team || { name: 'General', mission_statement: 'Execute tasks.' },
+      project: project || { name: 'Default', description: '', repository_path: process.cwd(), global_rules: '' },
       specialists: specialists,
       history: comments
     });
@@ -1508,23 +2245,72 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Get all projects for a runner (universal runner)
+app.get('/api/runner/projects', async (req, res) => {
+  const { token } = req.query;
+  if (!token) {
+    return res.status(400).json({ error: 'Runner token required' });
+  }
+
+  try {
+    let projects = [];
+
+    // First, try to find projects by project-specific token
+    const projectByToken = await get('SELECT id FROM projects WHERE runner_token = ?', [token]);
+    if (projectByToken) {
+      projects = await all('SELECT * FROM projects WHERE id = ?', [projectByToken.id]);
+    } else {
+      // If not found, try to find user by user-level token and get all their projects
+      const user = await get('SELECT id FROM users WHERE runner_token = ?', [token]);
+      if (user) {
+        projects = await all(`
+          SELECT p.* FROM projects p
+          WHERE p.created_by = ?
+          OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+        `, [user.id, user.id]);
+      }
+    }
+
+    res.json(projects);
+  } catch (err) {
+    logger.error('Failed to fetch runner projects:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Log ingestion for runners
 app.post('/api/runner/logs', async (req, res) => {
   const { taskId, chunk } = req.body;
-  if (taskId && chunk) {
-    // Broadcast log to the specific task room
+  if (taskId && chunk) {    // Broadcast log to the specific task room
     io.emit(`task-logs-${taskId}`, { chunk, timestamp: new Date().toISOString() });
   }
   res.sendStatus(200);
 });
 
-// Runner heartbeat
+// Runner heartbeat - supports both project and user tokens
 app.post('/api/runner/heartbeat', async (req, res) => {
-  const { runnerToken } = req.body;
-  if (runnerToken) {
-    await run('UPDATE projects SET last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?', [runnerToken]);
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token required' });
   }
-  res.sendStatus(200);
+
+  try {
+    // 1. Try updating user's last_seen (Universal Runner)
+    const userResult = await run('UPDATE users SET runner_last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?', [token]);
+
+    // 2. Also try updating project's last_seen (Project-specific Runner or legacy)
+    const projectResult = await run('UPDATE projects SET last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?', [token]);
+
+    if (userResult.changes === 0 && projectResult.changes === 0) {
+      // If neither was updated, log it but don't fail (might be an old token)
+      logger.warn(`[Heartbeat] Unknown token received: ${token.substring(0, 5)}...`);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Heartbeat] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 404 handler - must be after all routes

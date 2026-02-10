@@ -29,6 +29,12 @@ export interface Task {
   model_used?: string;
   execution_started_at?: string;
   execution_completed_at?: string;
+  completion_report?: string; // AI-generated summary of completed work
+  // Project and Team context
+  project_id?: string;
+  project_name?: string;
+  team_id?: string;
+  team_name?: string;
   // Error tracking
   failed_at?: string;
 }

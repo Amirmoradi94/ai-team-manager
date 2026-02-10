@@ -203,6 +203,7 @@ db.serialize(() => {
   // Add universal runner token columns to users
   db.run(`ALTER TABLE users ADD COLUMN runner_token TEXT`, () => {});
   db.run(`ALTER TABLE users ADD COLUMN runner_last_seen DATETIME`, () => {});
+db.run(`ALTER TABLE users ADD COLUMN cto_resource_status TEXT`, () => {}); // JSON string for resource limits
 
   // Create projects table
   db.run(`CREATE TABLE IF NOT EXISTS projects (
@@ -1149,7 +1150,74 @@ app.patch('/api/users/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// --- SETTINGS ROUTES ---
+// --- CTO INTELLIGENCE ROUTES ---
+
+// Get CTO configuration
+app.get('/api/cto/config', authenticateToken, async (req, res) => {
+  try {
+    const row = await get('SELECT value FROM settings WHERE key = ?', ['cto_config']);
+    const defaultConfig = {
+      enabled: true,
+      useAIForDecisions: true,
+      ctoProvider: 'gemini-3-pro',
+      strategy: 'balanced',
+      autonomyLevel: 'full',
+      activeProviders: ['claude', 'gemini', 'codex'],
+      subscriptions: {
+        claude: { plan: 'max5x' },
+        gemini: { plan: 'ultra' },
+        codex: { plan: 'plus' }
+      },
+      maxRetries: 2,
+      splitComplexityScore: 45,
+      deferWindowUsagePercent: 90
+    };
+
+    if (row) {
+      const savedConfig = JSON.parse(row.value);
+      // Merge with default and force core flags to true
+      res.json({ 
+        ...defaultConfig, 
+        ...savedConfig,
+        enabled: true,
+        useAIForDecisions: true 
+      });
+    } else {
+      res.json(defaultConfig);
+    }
+  } catch (err) {
+    logger.error('Failed to fetch CTO settings:', err);
+    res.status(500).json({ error: 'Failed to fetch CTO settings' });
+  }
+});
+
+app.get('/api/cto/resource-status', authenticateToken, async (req, res) => {
+  try {
+    const user = await get('SELECT cto_resource_status FROM users WHERE id = ?', [req.user.id]);
+    if (user?.cto_resource_status) {
+      return res.json(JSON.parse(user.cto_resource_status));
+    }
+    res.json(null);
+  } catch (err) {
+    logger.error('Failed to fetch CTO resource status:', err);
+    res.status(500).json({ error: 'Failed to fetch CTO resource status' });
+  }
+});
+
+// Update CTO configuration
+app.put('/api/cto/config', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const value = JSON.stringify(req.body);
+    await run(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP',
+      ['cto_config', value, value]
+    );
+    res.json({ success: true, config: req.body });
+  } catch (err) {
+    logger.error('Failed to update CTO settings:', err);
+    res.status(500).json({ error: 'Failed to update CTO settings' });
+  }
+});
 
 app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
@@ -1565,6 +1633,29 @@ app.get('/api/projects/:id/teams', authenticateToken, async (req, res) => {
 
 // --- RUNNER (UNIVERSAL) ROUTES ---
 
+// Get active tasks (in-progress) for CTO dashboard
+app.get('/api/runner/active-tasks', authenticateToken, async (req, res) => {
+  try {
+    const tasks = await all(`
+      SELECT t.*, 
+             u.name as assignee_name, 
+             u.model_config as assignee_model_config,
+             p.name as project_name, 
+             tm.name as team_name
+      FROM tasks t
+      LEFT JOIN users u ON t.assignee_id = u.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
+      WHERE t.status = 'in-progress'
+      ORDER BY t.created_at ASC
+    `);
+    res.json(tasks);
+  } catch (err) {
+    logger.error('Failed to fetch active tasks:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Generate runner token for the authenticated user
 app.post('/api/runner/generate-token', authenticateToken, async (req, res) => {
   try {
@@ -1770,6 +1861,24 @@ app.get('/api/runner/tasks', async (req, res) => {
     res.json(tasks);
   } catch (err) {
     logger.error('Failed to fetch runner tasks:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get subtasks for a task
+app.get('/api/tasks/:id/subtasks', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const subtasks = await all(`
+      SELECT t.*, u.name as assignee_name, p.name as project_name
+      FROM tasks t
+      LEFT JOIN users u ON t.assignee_id = u.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      WHERE t.parent_id = ?
+      ORDER BY t.created_at ASC
+    `, [id]);
+    res.json(subtasks);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -2289,14 +2398,22 @@ app.post('/api/runner/logs', async (req, res) => {
 
 // Runner heartbeat - supports both project and user tokens
 app.post('/api/runner/heartbeat', async (req, res) => {
-  const { token } = req.body;
+  const { token, resourceStatus } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'Token required' });
   }
 
   try {
-    // 1. Try updating user's last_seen (Universal Runner)
-    const userResult = await run('UPDATE users SET runner_last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?', [token]);
+    // 1. Try updating user's last_seen (Universal Runner) and resource status
+    let userResult;
+    if (resourceStatus) {
+      userResult = await run(
+        'UPDATE users SET runner_last_seen = CURRENT_TIMESTAMP, cto_resource_status = ? WHERE runner_token = ?', 
+        [JSON.stringify(resourceStatus), token]
+      );
+    } else {
+      userResult = await run('UPDATE users SET runner_last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?', [token]);
+    }
 
     // 2. Also try updating project's last_seen (Project-specific Runner or legacy)
     const projectResult = await run('UPDATE projects SET last_seen = CURRENT_TIMESTAMP WHERE runner_token = ?', [token]);

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Calendar as CalendarIcon, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import {
   Select,
   SelectContent,
@@ -41,13 +41,23 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
   const [projectId, setProjectId] = useState<string>('');
   const [agentId, setAgentId] = useState<string>('');
   const [teamId, setTeamId] = useState<string>('');
-  const [tags, setTags] = useState('');
+  const [deadline, setDeadline] = useState<Date | undefined>(undefined);
   const [scheduledDate, setScheduledDate] = useState<Date | undefined>(undefined);
   const [scheduledTime, setScheduledTime] = useState<string>('');
   const [isCalendarOpen, setIsCalendarOpen] = useState<boolean>(false);
+  const [isDeadlineCalendarOpen, setIsDeadlineCalendarOpen] = useState<boolean>(false);
   const [isCustomTimeActive, setIsCustomTimeActive] = useState<boolean>(false);
 
-  // ... (useEffects)
+  // Auto-assign team lead when team is selected
+  useEffect(() => {
+    if (teamId && teams) {
+      const selectedTeam = teams.find(t => t.id === teamId);
+      if (selectedTeam?.lead?.id) {
+        setAgentId(selectedTeam.lead.id);
+        setAssigneeId('');
+      }
+    }
+  }, [teamId, teams]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,12 +70,13 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
       priority,
       status,
       assignee,
+      assignee_id: agentId || assigneeId || undefined,
       project_id: projectId || undefined,
       agent_id: agentId || undefined,
       team_id: teamId || undefined,
-      tags: tags.split(',').map(t => t.trim()).filter(Boolean),
-      scheduledDate,
-      scheduledTime: scheduledTime || undefined,
+      due_date: deadline ? format(deadline, 'yyyy-MM-dd') : undefined,
+      scheduled_date: scheduledDate ? format(scheduledDate, 'yyyy-MM-dd') : undefined,
+      scheduled_time: scheduledTime || undefined,
     });
 
     // Reset form
@@ -77,7 +88,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
     setProjectId('');
     setAgentId('');
     setTeamId('');
-    setTags('');
+    setDeadline(undefined);
     setScheduledDate(undefined);
     setScheduledTime('');
     onClose();
@@ -130,12 +141,12 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                   <label className="block text-sm font-medium text-foreground mb-2">
                     Description
                   </label>
-                  <Textarea
+                  <RichTextEditor
                     value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Describe the task... Mention @Specialists if needed."
-                    rows={3}
-                    className="bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary resize-none"
+                    onChange={setDescription}
+                    placeholder="Describe the task... Use @ to mention team members, use ``` for code blocks"
+                    minHeight="150px"
+                    teamMembers={[...teamMembers, ...agents]}
                   />
                 </div>
 
@@ -145,7 +156,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                       Priority
                     </label>
                     <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-                      <SelectTrigger className="bg-secondary border-0">
+                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -162,7 +173,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                       Status
                     </label>
                     <Select value={status} onValueChange={(v) => setStatus(v as Status)}>
-                      <SelectTrigger className="bg-secondary border-0">
+                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -182,7 +193,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                       Project
                     </label>
                     <Select value={projectId} onValueChange={setProjectId}>
-                      <SelectTrigger className="bg-secondary border-0">
+                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
                         <SelectValue placeholder="Select project..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -196,7 +207,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
 
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Agent / Team / Assignee
+                      Team
                     </label>
                     <Select value={agentId || teamId || assigneeId} onValueChange={(val) => {
                       const isTeam = teams?.find(t => t.id === val);
@@ -216,15 +227,15 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                         setTeamId('');
                       }
                     }}>
-                      <SelectTrigger className="bg-secondary border-0">
+                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
                         <SelectValue placeholder="Select assignee..." />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Unassigned</SelectItem>
-                        
+
                         {teams && teams.length > 0 && (
                           <>
-                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">AI Teams</div>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">Teams</div>
                             {teams.map((team) => (
                               <SelectItem key={team.id} value={team.id}>
                                 <div className="flex items-center gap-2">
@@ -238,64 +249,78 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                           </>
                         )}
 
-                        {agents.length > 0 && (
+                        {teamMembers.filter(m => m.name === 'Amir Moradi').length > 0 && (
                           <>
-                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">Individual Agents</div>
-                            {agents.map((agent) => (
-                              <SelectItem key={agent.id} value={agent.id}>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">Individual</div>
+                            {teamMembers.filter(m => m.name === 'Amir Moradi').map((member) => (
+                              <SelectItem key={member.id} value={member.id}>
                                 <div className="flex items-center gap-2">
                                   <Avatar className="w-5 h-5">
-                                    <AvatarImage src={agent.avatar} />
-                                    <AvatarFallback>{agent.name[0]}</AvatarFallback>
+                                    <AvatarImage src={member.avatar} alt={member.name} />
+                                    <AvatarFallback className="text-xs">
+                                      {member.name.split(' ').map(n => n[0]).join('')}
+                                    </AvatarFallback>
                                   </Avatar>
-                                  <span>{agent.name}</span>
+                                  <span>{member.name}</span>
                                 </div>
                               </SelectItem>
                             ))}
                           </>
                         )}
-                        
-                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary/30">Team Members</div>
-                        {teamMembers.map((member) => (
-                          <SelectItem key={member.id} value={member.id}>
-                            <div className="flex items-center gap-2">
-                              <Avatar className="w-5 h-5">
-                                <AvatarImage src={member.avatar} alt={member.name} />
-                                <AvatarFallback className="text-xs">
-                                  {member.name.split(' ').map(n => n[0]).join('')}
-                                </AvatarFallback>
-                              </Avatar>
-                              <span>{member.name}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
                       </SelectContent>
                     </Select>
+                    {teamId && teams && (() => {
+                      const selectedTeam = teams.find(t => t.id === teamId);
+                      return selectedTeam?.lead ? (
+                        <p className="mt-2 text-xs text-primary flex items-center gap-1">
+                          <Users className="w-3 h-3" />
+                          Team lead "{selectedTeam.lead.name}" auto-assigned
+                        </p>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Tags
+                  <label className="block text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                    <CalendarIcon className="w-4 h-4 text-primary" />
+                    Deadline
                   </label>
-                  <Input
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    placeholder="Enter tags separated by commas..."
-                    className="bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
-                  />
+                  <Popover open={isDeadlineCalendarOpen} onOpenChange={setIsDeadlineCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start text-left font-normal bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0"
+                        onClick={() => setIsDeadlineCalendarOpen(true)}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {deadline ? format(deadline, 'PPP') : <span className="text-muted-foreground">Set deadline...</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={deadline}
+                        onSelect={(date) => {
+                          setDeadline(date);
+                          setIsDeadlineCalendarOpen(false);
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Scheduled Date
+                      Scheduled Date (Optional)
                     </label>
                     <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                       <PopoverTrigger asChild>
                         <Button
                           variant="outline"
-                          className="w-full justify-start text-left font-normal bg-secondary border-0"
+                          className="w-full justify-start text-left font-normal bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0"
                           onClick={() => setIsCalendarOpen(true)}
                         >
                           <CalendarIcon className="mr-2 h-4 w-4" />
@@ -354,7 +379,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                           }
                         }}
                       >
-                        <SelectTrigger className="bg-secondary border-0">
+                        <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
                           <SelectValue placeholder="Pick a time">
                             {scheduledTime ? (
                               <div className="flex items-center">

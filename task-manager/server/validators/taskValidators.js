@@ -40,6 +40,18 @@ const validateCreateTask = [
   body('assignee_id')
     .optional()
     .isString().withMessage('Invalid assignee ID'),
+  body('parent_id')
+    .optional()
+    .isString().withMessage('Invalid parent ID'),
+  body('task_type')
+    .optional()
+    .isIn(['task', 'epic', 'subtask']).withMessage('Invalid task type'),
+  body('resource_metadata')
+    .optional()
+    .isString().withMessage('Invalid resource metadata'),
+  body('team_id')
+    .optional()
+    .isString().withMessage('Invalid team ID'),
   handleValidationErrors
 ];
 
@@ -74,6 +86,18 @@ const validateUpdateTask = [
   body('assignee_id')
     .optional()
     .isString().withMessage('Invalid assignee ID'),
+  body('parent_id')
+    .optional()
+    .isString().withMessage('Invalid parent ID'),
+  body('task_type')
+    .optional()
+    .isIn(['task', 'epic', 'subtask']).withMessage('Invalid task type'),
+  body('resource_metadata')
+    .optional()
+    .isString().withMessage('Invalid resource metadata'),
+  body('team_id')
+    .optional()
+    .isString().withMessage('Invalid team ID'),
   handleValidationErrors
 ];
 

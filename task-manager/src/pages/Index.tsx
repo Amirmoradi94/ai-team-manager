@@ -4,6 +4,7 @@ import { Sidebar } from '@/components/Sidebar/Sidebar';
 import { Header } from '@/components/Header/Header';
 import { TaskBoard } from '@/components/TaskBoard/TaskBoard';
 import { StatsCards } from '@/components/Stats/StatsCards';
+import { CTODashboard } from './CTODashboard';
 import { CreateTaskModal } from '@/components/Modals/CreateTaskModal';
 import { InviteModal } from '@/components/Modals/InviteModal';
 import { UserManagementModal } from '@/components/Modals/UserManagementModal';
@@ -148,9 +149,10 @@ const Index = () => {
 
     // Set up polling interval
     const intervalId = setInterval(() => {
-      // Skip refresh if a delete happened in the last 3 seconds
+      // Skip refresh if a delete happened in the last 6 seconds
+      // This prevents deleted tasks from "re-appearing" before the DB is synced
       // OR if the create modal is open (avoiding race conditions during edit)
-      if (Date.now() - lastDeleteTime < 3000 || isCreateModalOpen) {
+      if (Date.now() - lastDeleteTime < 6000 || isCreateModalOpen) {
         return;
       }
       fetchTasks(token);
@@ -770,6 +772,10 @@ const Index = () => {
                 />
               </motion.div>
             </>
+          )}
+
+          {activeTab === 'cto' && (
+            <CTODashboard />
           )}
 
           {activeTab === 'projects' && (

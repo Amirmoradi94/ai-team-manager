@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Calendar, Edit3, Trash2, Send, ArrowLeft, CheckCircle2, Clock, Zap, FileEdit, Cpu, Terminal } from 'lucide-react';
+import { X, Calendar, Edit3, Trash2, Send, ArrowLeft, CheckCircle2, Clock, Zap, FileEdit, Cpu, Terminal, FolderKanban, Users, FileText, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -264,6 +264,27 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
               {/* Details */}
               <div className="p-6 space-y-4 border-b border-border">
                 <div className="grid grid-cols-2 gap-4">
+                  {/* Project and Team Info */}
+                  {task.project_name && (
+                    <div className="flex items-center justify-start">
+                      <span className="text-sm text-muted-foreground w-32">Project</span>
+                      <div className="flex items-center gap-2">
+                        <FolderKanban className="w-4 h-4 text-primary" />
+                        <span className="text-sm text-foreground font-medium">{task.project_name}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {task.team_name && (
+                    <div className="flex items-center justify-start">
+                      <span className="text-sm text-muted-foreground w-32">Team</span>
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-info" />
+                        <span className="text-sm text-foreground font-medium">{task.team_name}</span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-start">
                     <span className="text-sm text-muted-foreground w-32">Assigned to</span>
                     {task.assignee ? (
@@ -308,10 +329,10 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
 
                   {task.dueDate && (
                     <div className="flex items-center justify-start">
-                      <span className="text-sm text-muted-foreground w-24">Due date</span>
+                      <span className="text-sm text-muted-foreground w-24">Deadline</span>
                       <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-sm text-foreground">{format(task.dueDate, 'MMM d, yyyy')}</span>
+                        <CalendarClock className="w-4 h-4 text-destructive" />
+                        <span className="text-sm text-destructive font-semibold">{format(task.dueDate, 'MMM d, yyyy')}</span>
                       </div>
                     </div>
                   )}
@@ -325,8 +346,8 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
                           {(() => {
                             // Ensure date is treated as local by appending time if needed or just using the string parts
                             // If task.scheduledDate is a Date object, use it directly. If string, handle it.
-                            const dateObj = task.scheduledDate instanceof Date 
-                              ? task.scheduledDate 
+                            const dateObj = task.scheduledDate instanceof Date
+                              ? task.scheduledDate
                               : new Date(task.scheduledDate.toString().includes('T') ? task.scheduledDate : `${task.scheduledDate}T00:00:00`);
                             return format(dateObj, 'MMM d, yyyy');
                           })()}
@@ -361,12 +382,35 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
                 </div>
               )}
 
+              {/* Completion Report - Show for done tasks */}
+              {isDone && task.completion_report && (
+                <div className="p-6 border-b border-border bg-gradient-to-br from-primary/5 to-transparent">
+                  <h3 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-primary" />
+                    Completion Report
+                    {task.assignee && (
+                      <span className="text-xs px-2 py-1 rounded-full bg-primary/20 text-primary font-normal">
+                        by {task.assignee.name}
+                      </span>
+                    )}
+                  </h3>
+                  <div className="prose prose-invert prose-sm max-w-none bg-secondary/20 rounded-lg p-4 border border-border">
+                    <ReactMarkdown>{task.completion_report}</ReactMarkdown>
+                  </div>
+                </div>
+              )}
+
               {/* Execution Statistics - Only show for completed tasks */}
               {task.execution_time && (
                 <div className="p-6 border-b border-border">
                   <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                     <Zap className="w-5 h-5 text-primary" />
                     Execution Statistics
+                    {task.model_used && (
+                      <span className="text-xs px-2 py-1 rounded-full bg-accent/20 text-accent font-normal">
+                        {task.model_used}
+                      </span>
+                    )}
                   </h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {/* Execution Time */}
@@ -411,7 +455,7 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
                       <div className="bg-secondary/30 rounded-lg p-4 border border-border hover:border-primary/30 transition-colors">
                         <div className="flex items-center gap-2 mb-2">
                           <Cpu className="w-4 h-4 text-accent" />
-                          <span className="text-xs text-muted-foreground">Model</span>
+                          <span className="text-xs text-muted-foreground">AI Provider</span>
                         </div>
                         <p className="text-sm font-semibold text-foreground truncate">
                           {task.model_used.split('-').slice(-2).join('-')}

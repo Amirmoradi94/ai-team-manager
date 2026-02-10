@@ -357,7 +357,8 @@ class TaskManagerAPI {
           files_modified: metadata.files_modified,
           model_used: metadata.model_used,
           execution_started_at: metadata.execution_started_at,
-          execution_completed_at: metadata.execution_completed_at
+          execution_completed_at: metadata.execution_completed_at,
+          completion_report: metadata.completion_report
         }),
       });
 
@@ -520,6 +521,39 @@ class TaskManagerAPI {
   }
 
   /**
+   * Complete a task and update its status with results
+   */
+  async completeTask(taskId, data) {
+    if (!this.token) {
+      throw new Error('Not authenticated. Call login() first.');
+    }
+
+    console.log(`[API] Completing task ${taskId}...`);
+
+    try {
+      const response = await fetch(`${this.config.apiUrl}/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to complete task: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log(`[API] Task ${taskId} completed successfully`);
+      return result;
+    } catch (error) {
+      console.error(`[API] Error completing task:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get project and team info by runner token (for initial manifest sync)
    * Optionally accepts a projectId to fetch a specific project's full payload
    */
@@ -568,12 +602,15 @@ class TaskManagerAPI {
   /**
    * Send a heartbeat to the server to track runner connectivity (Universal Runner)
    */
-  async sendHeartbeat(runnerToken) {
+  async sendHeartbeat(runnerToken, resourceStatus = null) {
     try {
       const response = await fetch(`${this.config.apiUrl}/runner/heartbeat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: runnerToken })
+        body: JSON.stringify({ 
+          token: runnerToken,
+          resourceStatus
+        })
       });
       if (!response.ok) {
         console.error(`[Heartbeat] Failed: ${response.status} ${response.statusText}`);
@@ -629,6 +666,34 @@ class TaskManagerAPI {
 
   async createSpecialist(data) {
     return this._post('/specialists', data);
+  }
+
+  // ========== CTO INTELLIGENCE LAYER ==========
+
+  /**
+   * Get active (in-progress) tasks for resource pressure awareness
+   */
+  async getActiveTasks() {
+    return this._get('/runner/active-tasks');
+  }
+
+  /**
+   * Get subtasks for a parent task
+   */
+  async getSubtasks(taskId) {
+    return this._get(`/tasks/${taskId}/subtasks`);
+  }
+
+  /**
+   * Get CTO settings from the server
+   */
+  async getCTOSettings() {
+    try {
+      return await this._get('/cto/config');
+    } catch (e) {
+      // Config may not exist yet, return null
+      return null;
+    }
   }
 
   // ========== PRIVATE HELPERS ==========

@@ -11,6 +11,7 @@ import {
   FolderKanban,
   Plug,
   Trash2,
+  Brain,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { User } from '@/types/task';
@@ -27,12 +28,13 @@ interface SidebarProps {
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
+  { icon: Brain, label: 'CTO', id: 'cto', badge: 'AI' },
   { icon: FolderKanban, label: 'Projects', id: 'projects' },
-  { icon: Plug, label: 'Runner', id: 'runner' },
   { icon: Users, label: 'Teams', id: 'team' },
   { icon: Zap, label: 'Team Roles', id: 'specialists' },
   { icon: Calendar, label: 'Calendar', id: 'calendar' },
   { icon: BarChart3, label: 'Analytics', id: 'analytics' },
+  { icon: Plug, label: 'Runner', id: 'runner' },
   { icon: Settings, label: 'Settings', id: 'settings' },
 ];
 
@@ -94,6 +96,11 @@ export function Sidebar({
               >
                 <item.icon className="w-5 h-5" />
                 <span className="font-medium text-sm">{item.label}</span>
+                {item.badge && (
+                  <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-gradient-to-r from-purple-500 to-blue-500 text-white">
+                    {item.badge}
+                  </span>
+                )}
                 {isActive && (
                   <motion.div
                     layoutId="activeNav"

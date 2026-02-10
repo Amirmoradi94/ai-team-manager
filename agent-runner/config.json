@@ -2,7 +2,9 @@
   "taskManagerAPI": {
     "apiUrl": "http://localhost:3001/api",
     "runnerToken": "havl313ib5lsu44jm4kgck",
-    "projectToken": "havl313ib5lsu44jm4kgck"
+    "projectToken": "havl313ib5lsu44jm4kgck",
+    "email": "amir94eng@gmail.com",
+    "password": "Admin@123"
   },
   "schedule": {
     "checkInterval": "*/30 * * * *",
@@ -21,5 +23,34 @@
   },
   "notifications": {
     "email": "amir.94.eng@gmail.com"
+  },
+  "cto": {
+    "enabled": true,
+    "useAIForDecisions": true,
+    "ctoProvider": "gemini-3-pro",
+    "models": {
+      "preferredModels": [
+        "gemini-3-pro",
+        "claude-opus-4.5",
+        "gpt-5.2",
+        "claude-sonnet-4.5",
+        "gemini-2.0-flash"
+      ]
+    },
+    "subscriptions": {
+      "claude":  { "plan": "max5x" },
+      "gemini":  { "plan": "ultra" },
+      "codex":   { "plan": "plus" }
+    },
+    "thresholds": {
+      "splitComplexityScore": 45,
+      "deferWindowUsagePercent": 90,
+      "reserveBuffer": 5,
+      "maxRetries": 2
+    },
+    "preferences": {
+      "maxConcurrentTasks": 1,
+      "logDecisions": true
+    }
   }
 }

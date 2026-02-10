@@ -11,9 +11,9 @@ class AgentExecutor {
     this.workDir = workDir;
     this.logsDir = path.join(workDir, 'logs');
     // Runner Brain Directory (centralized intelligence) - inside agent-runner package
-    this.runnerBrainDir = path.join(__dirname, 'runner_brain');
-    this.globalRolesDir = path.join(this.runnerBrainDir, 'roles');
-    this.globalTeamsDir = path.join(this.runnerBrainDir, 'teams');
+    this.teamLeadDir = path.join(__dirname, 'team_lead');
+    this.globalRolesDir = path.join(this.teamLeadDir, 'roles');
+    this.globalTeamsDir = path.join(this.teamLeadDir, 'teams');
   }
 
   async ensureLogsDir() {
@@ -36,15 +36,18 @@ class AgentExecutor {
   }
 
   /**
-   * Sync Runner Brain (Global Intelligence) - ~/runner_brain/
+   * Sync Runner Brain (Global Intelligence) - ~/team_lead/
    * This is where ALL roles and teams are stored globally
    */
   async syncRunnerBrain(allSpecialists = [], allTeams = []) {
     try {
       // Ensure Runner Brain directories exist
-      await this.ensureDirectoryExists(this.runnerBrainDir);
+      await this.ensureDirectoryExists(this.teamLeadDir);
       await this.ensureDirectoryExists(this.globalRolesDir);
       await this.ensureDirectoryExists(this.globalTeamsDir);
+      // CTO product manager directory for persistent state
+      const pmDir = path.join(this.teamLeadDir, 'product_manager');
+      await this.ensureDirectoryExists(pmDir);
 
       // Cleanup: Remove team folders that no longer exist in the database
       try {
@@ -63,7 +66,7 @@ class AgentExecutor {
         console.error(`[Runner Brain] Error cleaning up team folders:`, error.message);
       }
 
-      // 1. Sync ALL Roles to ~/runner_brain/roles/
+      // 1. Sync ALL Roles to ~/team_lead/roles/
       if (allSpecialists && allSpecialists.length > 0) {
         for (const spec of allSpecialists) {
           const specFilename = spec.name.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '.md';
@@ -85,7 +88,7 @@ ${spec.tools || 'Standard tools'}
         }
       }
 
-      // 2. Sync ALL Teams to ~/runner_brain/teams/
+      // 2. Sync ALL Teams to ~/team_lead/teams/
       if (allTeams && allTeams.length > 0) {
         for (const team of allTeams) {
           const teamFolderName = team.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
@@ -117,7 +120,7 @@ ${team.mission_statement || 'Execute assigned tasks efficiently.'}
 ${team.specialists && team.specialists.length > 0
   ? team.specialists.map(s => {
       const specFile = s.name.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '.md';
-      return `- **${s.name}**: See \`~/runner_brain/roles/${specFile}\``;
+      return `- **${s.name}**: See \`~/team_lead/roles/${specFile}\``;
     }).join('\n')
   : '- No roles assigned yet.'}
 
@@ -128,7 +131,7 @@ ${team.specialists && team.specialists.length > 0
         }
       }
 
-      console.log(`[Runner Brain] Synced ${allSpecialists.length} roles and ${allTeams.length} teams to ~/runner_brain/`);
+      console.log(`[Runner Brain] Synced ${allSpecialists.length} roles and ${allTeams.length} teams to ~/team_lead/`);
       return true;
     } catch (error) {
       console.error(`[Runner Brain] Failed to sync:`, error.message);
@@ -177,8 +180,8 @@ This file tracks all AI-powered work performed on this project. Each entry shoul
             const teamFolderName = t.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
             return `### ${t.name}
 - **Mission**: ${t.mission_statement || 'N/A'}
-- **Lead Identity**: \`~/runner_brain/teams/${teamFolderName}/LEAD.md\`
-- **Team Details**: \`~/runner_brain/teams/${teamFolderName}/MISSION.md\``;
+- **Lead Identity**: \`~/team_lead/teams/${teamFolderName}/LEAD.md\`
+- **Team Details**: \`~/team_lead/teams/${teamFolderName}/MISSION.md\``;
           }).join('\n\n')
         : '*No teams assigned yet. Assign teams in the task manager UI.*';
 
@@ -206,11 +209,11 @@ When you (an AI agent) are assigned a task in this project:
 
 1. **Identify Your Team**
    - Check which team you belong to from the list above
-   - Read your team's LEAD.md file at \`~/runner_brain/teams/{team_name}/LEAD.md\`
+   - Read your team's LEAD.md file at \`~/team_lead/teams/{team_name}/LEAD.md\`
    - Understand your identity, role, and responsibilities
 
 2. **Understand Your Mission**
-   - Read your team's MISSION.md file at \`~/runner_brain/teams/{team_name}/MISSION.md\`
+   - Read your team's MISSION.md file at \`~/team_lead/teams/{team_name}/MISSION.md\`
    - Understand your team's goals and mission statement
    - Review assigned roles you can collaborate with
 
@@ -220,7 +223,7 @@ When you (an AI agent) are assigned a task in this project:
    - Work within the repository path specified
 
 4. **Check Available Roles**
-   - Global roles are available at: \`~/runner_brain/roles/\`
+   - Global roles are available at: \`~/team_lead/roles/\`
    - Review their capabilities when you need specialized help
 
 5. **Execute Your Task**
@@ -236,7 +239,7 @@ When you (an AI agent) are assigned a task in this project:
 ---
 
 *Last synced: ${new Date().toLocaleString()}*
-*Team intelligence is stored centrally in ~/runner_brain/*
+*Team intelligence is stored centrally in ~/team_lead/*
 `;
       await fs.writeFile(path.join(contextDir, 'PROJECT.md'), projectContent);
 
@@ -256,12 +259,30 @@ When you (an AI agent) are assigned a task in this project:
     // Legacy support kept empty to avoid breaking older calls
   }
 
+  /**
+   * Execute task with specific model (used by CTO for AI-powered decisions)
+   */
+  async execute(task, provider = 'claude', model = null) {
+    const prompt = task.description || task.title;
+    return this.executeTask(prompt, {
+      provider,
+      model,
+      mode: 'cli',
+      taskId: task.id,
+      workDir: process.cwd()
+    });
+  }
+
   async executeTask(prompt, options = {}) {
     await this.ensureLogsDir();
     const provider = options.provider || 'claude';
+    const model = options.model || null; // CTO-specified model
     const mode = options.mode || 'cli';
     const taskId = options.taskId;
-    
+
+    const modelInfo = model ? ` [${model}]` : '';
+    console.log(`[Executor] Starting task execution with ${provider}${modelInfo} (mode: ${mode}, taskId: ${taskId})`);
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const sessionName = `${provider}-task-${timestamp}`;
     const outputFile = path.join(this.logsDir, `${sessionName}-output.jsonl`);
@@ -272,19 +293,34 @@ When you (an AI agent) are assigned a task in this project:
     try {
       await fs.writeFile(promptFile, prompt);
       let providerCommand = '';
+
+      // Add --model flag if CTO specified a model
+      const modelFlag = model ? ` --model ${model}` : '';
+
       switch (provider) {
-        case 'gemini': providerCommand = `gemini chat -p "$(cat ${promptFile})" --format json`; break;
+        case 'gemini':
+          providerCommand = `gemini --prompt "$(cat ${promptFile})"${modelFlag} --output-format stream-json --yolo`;
+          break;
         case 'codex':
-        case 'openai': providerCommand = `codex -p "$(cat ${promptFile})" --json`; break;
+        case 'openai':
+          providerCommand = `codex -p "$(cat ${promptFile})"${modelFlag} --json`;
+          break;
         case 'claude':
-        default: providerCommand = `unset ANTHROPIC_API_KEY && claude -p "$(cat ${promptFile})" --permission-mode bypassPermissions --output-format stream-json --verbose`; break;
+        default:
+          providerCommand = `unset ANTHROPIC_API_KEY && claude -p "$(cat ${promptFile})"${modelFlag} --permission-mode bypassPermissions --output-format stream-json --verbose`;
+          break;
       }
 
-      const scriptContent = `#!/bin/bash\nset -e\ncd ${this.workDir}\n${providerCommand} > ${outputFile} 2>&1\nexit $?\n`;
+      const workingDir = options.workDir || this.workDir;
+      const scriptContent = `#!/bin/bash\nset -e\ncd ${workingDir}\n${providerCommand} > ${outputFile} 2>&1\nexit $?\n`;
       await fs.writeFile(wrapperScript, scriptContent);
       await fs.chmod(wrapperScript, '755');
+      console.log(`[Executor] Launching ${provider} CLI in background...`);
+      console.log(`[Executor] Working directory: ${workingDir}`);
+      console.log(`[Executor] Output file: ${outputFile}`);
       await execAsync(`bash ${wrapperScript} > /dev/null 2>&1 &`);
       await this.sleep(500);
+      console.log(`[Executor] Monitoring output file for results...`);
       const result = await this.monitorOutputFile(outputFile, logFile, promptFile, taskId);
       try { await fs.unlink(wrapperScript); await fs.unlink(promptFile); } catch (e) {}
       return result;
@@ -383,51 +419,90 @@ When you (an AI agent) are assigned a task in this project:
 
     // 4. Construct Prompt using Runner-Centralized Intelligence
     const teamFolderName = team.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-    const runnerBrainPath = this.runnerBrainDir;
+    const runnerBrainPath = this.teamLeadDir;
 
     const prompt = `
 <identity>
-You are **${identity.name}**, the Team Lead for **${team.name}**.
+You are **${identity.name}**, the **TEAM LEAD** for **${team.name}**.
 
-🧠 **Your Brain Location:**
-- Core Identity: \`${runnerBrainPath}/teams/${teamFolderName}/LEAD.md\`
-- Team Mission: \`${runnerBrainPath}/teams/${teamFolderName}/MISSION.md\`
+🎯 **Your Role:**
+As Team Lead, you are NOT just an individual contributor. You are a MANAGER responsible for:
+- **Strategic Planning**: Breaking down tasks and planning the approach
+- **Team Coordination**: Delegating work to your specialist team members when appropriate
+- **Quality Oversight**: Ensuring all work meets high standards
+- **Execution**: Completing tasks yourself when appropriate, or orchestrating team efforts
+- **Reporting**: Delivering clear, complete results to stakeholders
 
-Read these files FIRST to understand who you are and what your team does.
+🧠 **Your Brain & Resources:**
+- **Your Identity**: \`${runnerBrainPath}/teams/${teamFolderName}/LEAD.md\`
+- **Team Mission**: \`${runnerBrainPath}/teams/${teamFolderName}/MISSION.md\`
+- **Available Roles**: \`${runnerBrainPath}/roles/\` (read any role's .md file to understand their capabilities)
+
+📋 **Your Team:**
+You have access to specialized roles who can assist with specific aspects of work. Read their documentation to understand when to leverage their expertise.
 </identity>
 
-<task_context>
+<task_assignment>
 **Title:** ${task.title}
 **Description:** ${task.description}
-</task_context>
+
+${conversationHistory ? '**Previous Context:**' + conversationHistory : ''}
+</task_assignment>
 
 <workspace>
-You are working in: \`${project.repository_path || process.cwd()}\`
+**Working Directory:** \`${project.repository_path || process.cwd()}\`
 
-📋 **Project Context:** Read \`${contextDir}/PROJECT.md\` for project-specific rules and requirements.
-📝 **Session Info:** Read \`${contextDir}/CURRENT_SESSION.md\` for current session details.
+**Project Guidelines:**
+- Read \`${contextDir}/PROJECT.md\` for project-specific rules and requirements
+- Read \`${contextDir}/CURRENT_SESSION.md\` for current session details
+- Follow all coding standards and best practices outlined in project context
 </workspace>
 
-<available_roles>
-Global roles are available at: \`${runnerBrainPath}/roles/\`
+<leadership_approach>
+**How to Approach This Task:**
 
-You can invoke any role's capabilities by reading their .md file and understanding their responsibilities.
-</available_roles>
+1. **UNDERSTAND** - Read your identity files and project context first
+2. **ANALYZE** - Break down the requirements and complexity
+3. **PLAN** - Decide the best approach:
+   - Can you handle this directly? → Execute it
+   - Need specialist expertise? → Read their role docs and leverage their capabilities
+   - Complex multi-part task? → Coordinate multiple specialists
+4. **EXECUTE** - Complete the work with excellence
+5. **VERIFY** - Ensure quality and completeness
+6. **REPORT** - The files you create/modify ARE your report to stakeholders
 
-${conversationHistory}
+**Remember:**
+- You represent your team - deliver professional, high-quality work
+- Think strategically, not just tactically
+- When in doubt, over-communicate rather than under-communicate
+- Your work reflects on the entire ${team.name} team
+</leadership_approach>
 
 <instruction>
-**Your Mission:**
-1. Read your identity files to understand your role
-2. Read the project context to understand requirements
-3. Execute the task following all rules and guidelines
-4. Execute autonomously with best judgment
+Now, as the Team Lead, complete this task with excellence. Show your leadership by delivering outstanding results.
 
-Complete the task now.
+**IMPORTANT - Final Deliverable:**
+After completing the work, you MUST provide a completion summary in this exact format:
+
+---COMPLETION REPORT---
+## Task Summary
+[Brief 1-2 sentence overview of what was accomplished]
+
+## Changes Made
+[Bulleted list of specific changes, files modified, features added, etc.]
+
+## Technical Details
+[Any important technical decisions, approaches used, or considerations]
+
+## Next Steps (if applicable)
+[Any recommended follow-up work or things to watch for]
+---END REPORT---
+
+This report will be shown to the project stakeholders, so make it clear, professional, and informative.
 </instruction>
     `.trim();
 
-    return this.executeTask(prompt, { provider, mode: 'cli', taskId: task.id });
+    return this.executeTask(prompt, { provider, mode: 'cli', taskId: task.id, workDir: project.repository_path || process.cwd() });
   }
 
   sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }

@@ -46,6 +46,7 @@ import { capitalize } from '@/lib/utils';
 const WeeklyCalendar = lazy(() => import('@/components/Calendar').then(m => ({ default: m.WeeklyCalendar })));
 const AnalyticsDashboard = lazy(() => import('@/components/Analytics').then(m => ({ default: m.AnalyticsDashboard })));
 const SettingsPage = lazy(() => import('@/components/Settings').then(m => ({ default: m.SettingsPage })));
+const ArsenalPage = lazy(() => import('./ArsenalPage').then(m => ({ default: m.ArsenalPage })));
 const LoginPage = lazy(() => import('@/components/Auth/LoginPage').then(m => ({ default: m.LoginPage })));
 const RunnerPage = lazy(() => import('./RunnerPage').then(m => ({ default: m.RunnerPage })));
 
@@ -1015,6 +1016,12 @@ const Index = () => {
                 {specialists.length === 0 && <p className="text-muted-foreground">No roles defined yet. Click "Add Role" to get started.</p>}
               </div>
             </motion.div>
+          )}
+
+          {activeTab === 'arsenal' && (
+            <Suspense fallback={<LoadingSpinner />}>
+              <ArsenalPage />
+            </Suspense>
           )}
 
           {activeTab === 'tasks' && (

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
+  Cpu,
   Activity,
   Zap,
   AlertTriangle,
@@ -251,7 +252,7 @@ export function CTODashboard() {
                 Behavior & Strategy
               </h3>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
                 {/* Strategic Mode */}
                 <div className="space-y-4">
                   <label className="text-base font-semibold text-foreground flex items-center gap-2">
@@ -313,13 +314,75 @@ export function CTODashboard() {
                   </p>
                 </div>
               </div>
+
+              {/* CTO Brain Configuration (Explicit Model Selection) */}
+              <div className="pt-8 border-t border-border space-y-6">
+                <div className="flex items-center justify-between">
+                  <label className="text-base font-semibold text-foreground flex items-center gap-2">
+                    <Cpu className="w-5 h-5 text-primary" />
+                    CTO Brain Configuration
+                  </label>
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
+                    <Sparkles className="w-3 h-3 text-primary" />
+                    <span className="text-[10px] font-bold text-primary uppercase">Reasoning Engine</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Provider Choice */}
+                  <div className="space-y-3">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Decision Provider</span>
+                    <div className="flex p-1 bg-secondary/20 rounded-lg border border-border/50">
+                      {['claude', 'gemini'].map(p => (
+                        <button
+                          key={p}
+                          onClick={() => {
+                            const newModel = p === 'claude' ? 'claude-opus-4.5' : 'gemini-3-pro';
+                            saveConfig({ ...config, ctoProvider: newModel });
+                          }}
+                          className={`flex-1 py-2 rounded-md text-xs font-bold capitalize transition-all ${
+                            (config.ctoProvider.includes(p))
+                              ? 'bg-background text-foreground shadow-sm border border-border/50'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Explicit Model Selection */}
+                  <div className="space-y-3">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Active Reasoning Model</span>
+                    <select
+                      value={config.ctoProvider}
+                      onChange={(e) => saveConfig({ ...config, ctoProvider: e.target.value })}
+                      className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-bold text-foreground focus:ring-2 ring-primary/20 outline-none cursor-pointer"
+                    >
+                      {config.ctoProvider.includes('claude') ? (
+                        <>
+                          <option value="claude-opus-4.6">Claude Opus 4.6 (Max Intelligence)</option>
+                          <option value="claude-sonnet-4.5">Claude Sonnet 4.5 (Optimal Balance)</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="gemini-3-pro">Gemini 3 Pro (Vision & Logic)</option>
+                          <option value="gemini-3-flash">Gemini 3 Flash (Speed Optimized)</option>
+                          <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+                </div>
+              </div>
             </motion.div>
 
             {/* Provider & Resources Section */}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card p-8 border border-border shadow-sm">
               <h3 className="text-xl font-bold text-foreground mb-4 flex items-center gap-3">
                 <Server className="w-6 h-6 text-primary" />
-                Active Providers & Subscriptions
+                Active Subscriptions
               </h3>
               <p className="text-base text-muted-foreground mb-6">
                 Enable only the providers you have active subscriptions for.
@@ -508,53 +571,6 @@ export function CTODashboard() {
           {/* Right Column: Status & Monitoring */}
           <div className="space-y-6">
             
-            {/* Organization Chart (Flowchart Style) */}
-            <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="glass-card p-6 border border-border shadow-sm">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-muted-foreground/60 mb-10 text-center">
-                System Hierarchy
-              </h3>
-              
-              <div className="flex flex-col items-center w-full max-w-[220px] mx-auto">
-                {/* OWNER / CEO */}
-                <div className="w-full flex flex-col items-center">
-                  <div className="w-full bg-foreground text-background py-3 px-4 shadow-xl border-b-4 border-primary/50 relative">
-                    <div className="absolute -top-2 left-4 bg-primary px-1.5 py-0.5 text-[7px] font-black uppercase tracking-tighter text-white">Owner</div>
-                    <div className="text-center font-black italic text-lg tracking-tight">CEO</div>
-                  </div>
-                </div>
-
-                {/* Main Vertical Trunk */}
-                <div className="h-8 w-1 bg-foreground"></div>
-
-                {/* EXECUTIVE / CTO */}
-                <div className="w-full flex flex-col items-center">
-                  <div className="w-full border-2 border-foreground bg-background p-3 shadow-md relative group hover:bg-foreground hover:text-background transition-all">
-                    <div className="absolute -top-2 left-4 bg-foreground text-background px-1.5 py-0.5 text-[7px] font-black uppercase tracking-tighter group-hover:bg-primary group-hover:text-white">Executive</div>
-                    <div className="text-center font-black italic text-base tracking-tight">CTO</div>
-                  </div>
-                </div>
-
-                {teams.length > 0 && (
-                  <div className="w-full flex flex-col items-center">
-                    <div className="h-8 w-1 bg-foreground"></div>
-                    
-                    {/* Units / Teams */}
-                    <div className="w-full space-y-4">
-                      {teams.map((team) => (
-                        <div key={team.id} className="flex flex-col items-center w-full">
-                          <div className="w-full border border-foreground/40 bg-secondary/5 p-2.5 relative hover:border-foreground transition-colors">
-                            <div className="absolute -top-2 left-3 bg-muted-foreground/20 text-foreground px-1 py-0.5 text-[6px] font-black uppercase tracking-tighter">Unit</div>
-                            <div className="text-center font-bold text-xs capitalize tracking-tight">{team.name}</div>
-                          </div>
-                          <div className="h-4 w-0.5 bg-foreground/20 last:hidden"></div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-
             {/* Resource Health Card */}
             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="glass-card p-8 border border-border h-fit shadow-sm">
               <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-3">
@@ -583,60 +599,72 @@ export function CTODashboard() {
                                                               <div className="flex justify-between items-end">
 
                                                                 <div className="flex flex-col">
-
                                                                   <span className="capitalize font-bold text-base">{provider}</span>
-
-                                                                  {status.source === 'external' && (
-
-                                                                    <span className="text-[10px] text-primary font-bold uppercase tracking-tighter">Verified Link</span>
-
-                                                                  )}
-
                                                                   {!status.available && status.reason && (
-
-                                                                    <span className="text-[10px] text-destructive font-bold uppercase tracking-tighter">{status.reason}</span>
-
+                                                                    <span className={`text-[10px] font-bold uppercase tracking-tighter ${status.needsAuth ? 'text-orange-500' : 'text-destructive'}`}>
+                                                                      {status.reason}
+                                                                    </span>
                                                                   )}
-
                                                                 </div>
 
-                                                                <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+                                                                                                  <div className="flex items-center gap-2">
+                                    {status.needsAuth ? (
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const token = localStorage.getItem('token');
+                                            await fetch(`${API_URL}/runner/open-terminal`, {
+                                              method: 'POST',
+                                              headers: { 
+                                                'Authorization': `Bearer ${token}`,
+                                                'Content-Type': 'application/json'
+                                              },
+                                              body: JSON.stringify({ command: provider })
+                                            });
+                                            toast.success(`Opening terminal for ${provider} login...`);
+                                          } catch (e) {
+                                            toast.error('Failed to trigger terminal');
+                                          }
+                                        }}
+                                        className="px-4 py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 text-xs font-bold border border-orange-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm"
+                                      >
+                                        Enable
+                                      </button>
+                                    ) : (
+                                      <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+                                        !status.available ? 'bg-destructive/10 text-destructive' :
+                                        health === 'healthy' ? 'bg-green-500/10 text-green-500' :
+                                        health === 'warning' ? 'bg-yellow-500/10 text-yellow-500' :
+                                        'bg-red-500/10 text-red-500'
+                                      }`}>
+                                        {!status.available ? 'Restricted' : `${Math.round((1 - (status.remaining5h / max)) * 100)}% Used`}
+                                      </span>
+                                    )}
+                                  </div>
 
-                                                                  !status.available ? 'bg-destructive/10 text-destructive' :
+                                                                                                </div>
 
-                                                                  health === 'healthy' ? 'bg-green-500/10 text-green-500' :
+                                                                                                <div className="h-3 w-full bg-secondary rounded-full overflow-hidden">
 
-                                                                  health === 'warning' ? 'bg-yellow-500/10 text-yellow-500' :
+                                                                                                  <div 
 
-                                                                  'bg-red-500/10 text-red-500'
+                                                                                                    className={`h-full rounded-full transition-all duration-500 ${
 
-                                                                }`}>
+                                                                                                      status.needsAuth ? 'bg-orange-500' :
 
-                                                                  {!status.available ? 'Restricted' : `${Math.round((1 - (status.remaining5h / max)) * 100)}% Used`}
+                                                                                                      !status.available ? 'bg-destructive' :
 
-                                                                </span>
+                                                                                                      health === 'healthy' ? 'bg-green-500' :
 
-                                                              </div>
+                                                                                                      health === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
 
-                                                              <div className="h-3 w-full bg-secondary rounded-full overflow-hidden">
+                                                                                                    }`}
 
-                                                                <div 
+                                                                                                    style={{ width: `${(status.needsAuth || !status.available) ? 100 : Math.min(100, (1 - (status.remaining5h / max)) * 100)}%` }}
 
-                                                                  className={`h-full rounded-full transition-all duration-500 ${
+                                                                                                  />
 
-                                                                    !status.available ? 'bg-destructive' :
-
-                                                                    health === 'healthy' ? 'bg-green-500' :
-
-                                                                    health === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
-
-                                                                  }`}
-
-                                                                  style={{ width: `${!status.available ? 100 : Math.min(100, (1 - (status.remaining5h / max)) * 100)}%` }}
-
-                                                                />
-
-                                                              </div>
+                                                                                                </div>
 
                                                             </div>
 

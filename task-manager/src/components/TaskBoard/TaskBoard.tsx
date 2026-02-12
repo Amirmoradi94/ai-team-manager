@@ -12,6 +12,7 @@ interface TaskBoardProps {
 const columns: { title: string; status: Status; locked?: boolean }[] = [
   { title: 'Backlog', status: 'backlog' },
   { title: 'To Do', status: 'todo' },
+  { title: 'Blocked', status: 'blocked' },
   { title: 'In Progress', status: 'in-progress' },
   { title: 'For Review', status: 'for-review' },
   { title: 'Done', status: 'done', locked: true }, // Only admin can move here
@@ -19,7 +20,7 @@ const columns: { title: string; status: Status; locked?: boolean }[] = [
 
 export function TaskBoard({ tasks, onAddTask, onTaskClick, onTaskMove, currentUser }: TaskBoardProps) {
   return (
-    <div className="flex gap-6 overflow-x-auto pb-4 px-1">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 pb-4 px-1">
       {columns.map((column) => (
         <TaskColumn
           key={column.status}

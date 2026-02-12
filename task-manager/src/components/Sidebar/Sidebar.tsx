@@ -12,6 +12,7 @@ import {
   Plug,
   Trash2,
   Brain,
+  Briefcase,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { User } from '@/types/task';
@@ -32,6 +33,7 @@ const navItems = [
   { icon: FolderKanban, label: 'Projects', id: 'projects' },
   { icon: Users, label: 'Teams', id: 'team' },
   { icon: Zap, label: 'Team Roles', id: 'specialists' },
+  { icon: Briefcase, label: 'Arsenal', id: 'arsenal', badge: 'NEW' },
   { icon: Calendar, label: 'Calendar', id: 'calendar' },
   { icon: BarChart3, label: 'Analytics', id: 'analytics' },
   { icon: Plug, label: 'Runner', id: 'runner' },

@@ -279,6 +279,7 @@ When you (an AI agent) are assigned a task in this project:
     const model = options.model || null; // CTO-specified model
     const mode = options.mode || 'cli';
     const taskId = options.taskId;
+    const envVars = options.env || {};
 
     const modelInfo = model ? ` [${model}]` : '';
     console.log(`[Executor] Starting task execution with ${provider}${modelInfo} (mode: ${mode}, taskId: ${taskId})`);
@@ -311,8 +312,13 @@ When you (an AI agent) are assigned a task in this project:
           break;
       }
 
+      // Build env exports
+      const envExports = Object.entries(envVars)
+        .map(([key, val]) => `export ${key}="${val.replace(/"/g, '\\"')}"`)
+        .join('\n');
+
       const workingDir = options.workDir || this.workDir;
-      const scriptContent = `#!/bin/bash\nset -e\ncd ${workingDir}\n${providerCommand} > ${outputFile} 2>&1\nexit $?\n`;
+      const scriptContent = `#!/bin/bash\nset -e\ncd ${workingDir}\n${envExports}\n${providerCommand} > ${outputFile} 2>&1\nexit $?\n`;
       await fs.writeFile(wrapperScript, scriptContent);
       await fs.chmod(wrapperScript, '755');
       console.log(`[Executor] Launching ${provider} CLI in background...`);
@@ -417,7 +423,41 @@ When you (an AI agent) are assigned a task in this project:
       if (config?.provider) provider = config.provider;
     } catch (e) {}
 
-    // 4. Construct Prompt using Runner-Centralized Intelligence
+    // 4. Fetch Arsenal Tools (Equipped capabilities)
+    let arsenalBlock = '';
+    let arsenalEnv = {};
+    try {
+      if (identity.id) {
+        const tools = await this.taskAPI.getSpecialistTools(identity.id);
+        if (tools && tools.length > 0) {
+          arsenalBlock = `
+<equipped_arsenal>
+You have been equipped with the following specialized capabilities. YOU MUST USE THEM when applicable.
+
+${tools.map(t => `### 🛠️ ${t.name} (${t.type.toUpperCase()})
+- **Description:** ${t.description}
+- **Usage Command:** \`${t.command}\`
+`).join('\n')}
+</equipped_arsenal>`;
+
+          // Prepare environment variables for credentials
+          tools.forEach(t => {
+            if (t.config_values) {
+              const config = JSON.parse(t.config_values);
+              Object.entries(config).forEach(([key, value]) => {
+                // Format: TOOLNAME_KEY (e.g. FIRECRAWL_API_KEY)
+                const envKey = `${t.name.toUpperCase().replace(/\s+/g, '_')}_${key.toUpperCase()}`;
+                if (value) arsenalEnv[envKey] = value;
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[Executor] Failed to fetch arsenal tools:', e.message);
+    }
+
+    // 5. Construct Prompt using Runner-Centralized Intelligence
     const teamFolderName = team.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
     const runnerBrainPath = this.teamLeadDir;
 
@@ -441,7 +481,7 @@ As Team Lead, you are NOT just an individual contributor. You are a MANAGER resp
 📋 **Your Team:**
 You have access to specialized roles who can assist with specific aspects of work. Read their documentation to understand when to leverage their expertise.
 </identity>
-
+${arsenalBlock}
 <task_assignment>
 **Title:** ${task.title}
 **Description:** ${task.description}
@@ -468,6 +508,7 @@ ${conversationHistory ? '**Previous Context:**' + conversationHistory : ''}
    - Need specialist expertise? → Read their role docs and leverage their capabilities
    - Complex multi-part task? → Coordinate multiple specialists
 4. **EXECUTE** - Complete the work with excellence
+   - **USE YOUR ARSENAL**: If you have equipped tools, use them instead of writing custom code for those tasks.
 5. **VERIFY** - Ensure quality and completeness
 6. **REPORT** - The files you create/modify ARE your report to stakeholders
 
@@ -502,7 +543,7 @@ This report will be shown to the project stakeholders, so make it clear, profess
 </instruction>
     `.trim();
 
-    return this.executeTask(prompt, { provider, mode: 'cli', taskId: task.id, workDir: project.repository_path || process.cwd() });
+    return this.executeTask(prompt, { provider, mode: 'cli', taskId: task.id, workDir: project.repository_path || process.cwd(), env: arsenalEnv });
   }
 
   sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }

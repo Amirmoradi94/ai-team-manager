@@ -240,6 +240,28 @@ db.run(`ALTER TABLE users ADD COLUMN cto_resource_status TEXT`, () => {}); // JS
 
   // --- NEW TEAM ARCHITECTURE ---
 
+  // Create tools table (Company Arsenal)
+  db.run(`CREATE TABLE IF NOT EXISTS tools (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    type TEXT NOT NULL, -- 'mcp', 'api', 'script'
+    command TEXT, -- The shell command to run (for MCP/Scripts)
+    config_schema TEXT, -- JSON string defining required credentials
+    icon TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Link specialists to tools (The 'Equip' link)
+  db.run(`CREATE TABLE IF NOT EXISTS specialist_tools (
+    specialist_id TEXT,
+    tool_id TEXT,
+    config_values TEXT, -- JSON string of tool-specific credentials (e.g. API Keys)
+    PRIMARY KEY (specialist_id, tool_id),
+    FOREIGN KEY(specialist_id) REFERENCES specialists(id) ON DELETE CASCADE,
+    FOREIGN KEY(tool_id) REFERENCES tools(id) ON DELETE CASCADE
+  )`);
+
   // Create teams table
   db.run(`CREATE TABLE IF NOT EXISTS teams (
     id TEXT PRIMARY KEY,
@@ -901,17 +923,23 @@ app.put('/api/tasks/:id', authenticateToken, validateUpdateTask, async (req, res
         (assignee_id && assignee_id !== oldTask?.assignee_id) ||
         // Scenario 3: Task info updated (title, description, etc.) while assigned to Claude
         (oldTask?.assignee_name?.toLowerCase() === 'claude' &&
-         (title || description || priority || due_date || scheduled_date || scheduled_time))
+         (title || description || priority || due_date || scheduled_date || scheduled_time)) ||
+        // Scenario 4: Task moved to "for-review" (Trigger CTO Review)
+        (status === 'for-review' && oldTask?.status !== 'for-review')
       )
     );
 
     if (shouldSendWebhook) {
       const reason =
+        (status === 'for-review') ? 'review_requested' :
         (status === 'todo' && oldTask?.status !== 'todo') ? 'moved to todo' :
         (assignee_id && assignee_id !== oldTask?.assignee_id) ? 'assigned to Claude' :
         'task updated';
+      
+      const webhookAction = (status === 'for-review') ? 'review_requested' : 'task_updated';
+
       logger.info(`[Webhook] Task ${id} ${reason}, notifying Claude`);
-      sendClaudeWebhook(updatedTask).catch(err => {
+      sendClaudeWebhook(updatedTask, webhookAction).catch(err => {
         logger.error('Failed to send Claude webhook:', err);
       });
     }
@@ -1059,6 +1087,17 @@ app.post('/api/tasks/:id/comments', authenticateToken, async (req, res) => {
     );
 
     const comment = await get('SELECT * FROM comments WHERE id = ?', [comment_id]);
+    
+    // Notify CTO of new comment (Clarification Loop)
+    if (!is_system) {
+      const task = await get('SELECT * FROM tasks WHERE id = ?', [task_id]);
+      if (task) {
+        sendClaudeWebhook(task, 'comment_added').catch(err => {
+          logger.error('Failed to send comment webhook:', err);
+        });
+      }
+    }
+
     res.json(comment);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1292,7 +1331,7 @@ app.delete('/api/users/:id', authenticateToken, requireAdmin, async (req, res) =
 // --- SETTINGS ROUTES ---
 
 // Helper function to send webhook to Claude
-async function sendClaudeWebhook(task) {
+async function sendClaudeWebhook(task, action = 'task_assigned') {
   try {
     // Get Claude webhook URL from settings
     const setting = await get('SELECT value FROM settings WHERE key = ?', ['claude_webhook_url']);
@@ -1306,7 +1345,7 @@ async function sendClaudeWebhook(task) {
     const webhookUrl = setting.value.trim();
     const secret = webhookSecret?.value || 'your-webhook-secret-change-this';
 
-    logger.info('Sending webhook to Claude:', { taskId: task.id, url: webhookUrl });
+    logger.info('Sending webhook to Claude:', { taskId: task.id, action, url: webhookUrl });
 
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -1316,6 +1355,7 @@ async function sendClaudeWebhook(task) {
       },
       body: JSON.stringify({
         id: task.id,
+        action: action, // 'task_assigned', 'review_requested', 'clarification_needed'
         title: task.title,
         description: task.description,
         status: task.status,
@@ -1654,6 +1694,17 @@ app.get('/api/runner/active-tasks', authenticateToken, async (req, res) => {
     logger.error('Failed to fetch active tasks:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Open terminal on runner machine (CEO's Mac)
+app.post('/api/runner/open-terminal', authenticateToken, async (req, res) => {
+  const { command } = req.body;
+  logger.info(`[Command] Request to open terminal for: ${command}`);
+  
+  // Broadcast to all connected sockets (The runner is listening)
+  io.emit('command:open-terminal', { command });
+  
+  res.json({ success: true });
 });
 
 // Generate runner token for the authenticated user
@@ -2286,6 +2337,66 @@ app.post('/api/specialists', authenticateToken, async (req, res) => {
     );
     const specialist = await get('SELECT * FROM specialists WHERE id = ?', [id]);
     res.json(specialist);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- ARSENAL (TOOLS) ROUTES ---
+
+// Get all arsenal tools
+app.get('/api/tools', authenticateToken, async (req, res) => {
+  try {
+    const tools = await all('SELECT * FROM tools ORDER BY name ASC');
+    res.json(tools);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Acquire a new capability (Marketplace -> Company Inventory)
+app.post('/api/tools', authenticateToken, requireAdmin, async (req, res) => {
+  const { name, description, type, command, config_schema, icon } = req.body;
+  const id = Math.random().toString(36).substr(2, 9);
+
+  try {
+    await run(
+      'INSERT INTO tools (id, name, description, type, command, config_schema, icon) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, name, description, type, command, config_schema, icon]
+    );
+    const tool = await get('SELECT * FROM tools WHERE id = ?', [id]);
+    res.json(tool);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get tools equipped for a specialist
+app.get('/api/specialists/:id/tools', authenticateToken, async (req, res) => {
+  try {
+    const tools = await all(`
+      SELECT t.*, st.config_values 
+      FROM tools t
+      JOIN specialist_tools st ON t.id = st.tool_id
+      WHERE st.specialist_id = ?
+    `, [req.params.id]);
+    res.json(tools);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Equip a specialist with a tool (Resource Allocation)
+app.post('/api/specialists/:id/equip', authenticateToken, requireAdmin, async (req, res) => {
+  const { tool_id, config_values } = req.body;
+  const specialist_id = req.params.id;
+
+  try {
+    await run(
+      'INSERT INTO specialist_tools (specialist_id, tool_id, config_values) VALUES (?, ?, ?) ON CONFLICT(specialist_id, tool_id) DO UPDATE SET config_values = ?',
+      [specialist_id, tool_id, config_values, config_values]
+    );
+    res.json({ success: true, message: 'Specialist equipped with asset' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

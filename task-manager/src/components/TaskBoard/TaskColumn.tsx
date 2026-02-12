@@ -21,6 +21,7 @@ const statusColors: Record<Status, string> = {
   'in-progress': 'bg-warning/20',
   'for-review': 'bg-purple-500/20',
   done: 'bg-success/20',
+  blocked: 'bg-destructive/20',
 };
 
 const statusDots: Record<Status, string> = {
@@ -29,6 +30,7 @@ const statusDots: Record<Status, string> = {
   'in-progress': 'bg-warning',
   'for-review': 'bg-purple-500',
   done: 'bg-success',
+  blocked: 'bg-destructive',
 };
 
 export function TaskColumn({
@@ -74,7 +76,7 @@ export function TaskColumn({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex flex-col w-80 min-w-[320px]"
+      className="flex flex-col w-full min-w-0"
     >
       <div className="flex items-center justify-between mb-4 px-1">
         <div className="flex items-center gap-2">

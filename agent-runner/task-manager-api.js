@@ -696,6 +696,13 @@ class TaskManagerAPI {
     }
   }
 
+  /**
+   * Get tools assigned to a specialist (with config)
+   */
+  async getSpecialistTools(specialistId) {
+    return this._get(`/specialists/${specialistId}/tools`);
+  }
+
   // ========== PRIVATE HELPERS ==========
 
   async _get(endpoint) {

@@ -24,7 +24,7 @@ class AIDecisionEngine {
     const { title, description } = task;
 
     // Select best AI model for this analysis
-    const modelSelection = this.modelSelector.selectModel('moderate');
+    const modelSelection = this.modelSelector.selectModel('high');
 
     if (!modelSelection.model) {
       console.log('[CTO] No AI model available for decision-making. Falling back to rule-based.');
@@ -33,43 +33,63 @@ class AIDecisionEngine {
 
     console.log(`[CTO] Using ${modelSelection.model} for task analysis...`);
 
-    const prompt = `You are a CTO evaluating a software development task. Analyze this task and make a strategic decision.
+    const prompt = `
+<cto_role>
+You are the **Chief Technology Officer (CTO)** powered by an advanced reasoning engine (Claude Opus 4.5 / Gemini 3 Pro).
+Your job is **STRATEGIC ARCHITECTURE & ORCHESTRATION**.
 
-**Task Title:** ${title}
+You do not write code. You design the solution and **DELEGATE** execution to your Team Lead.
+You must use your **THINKING CAPABILITIES** to plan a robust, production-grade implementation.
+</cto_role>
 
-**Task Description:**
-${description || 'No description provided'}
+<task>
+Title: ${title}
+Description: ${description || 'No description provided'}
+Project: ${task.project_name || 'Unknown'}
+</task>
 
-**Context:**
-- Available Providers: ${context.availableProviders?.join(', ') || 'claude, gemini, codex'}
-- Resource Status: ${JSON.stringify(context.resourceStatus || {}).substring(0, 200)}
-- Historical Success Rate: ${context.historicalData?.successRate || 'Unknown'}%
+<context>
+Available Providers: ${context.availableProviders?.join(', ') || 'claude, gemini, codex'}
+Resources: ${JSON.stringify(context.resourceStatus || {}).substring(0, 200)}
+History: ${JSON.stringify(context.historicalData)}
+Available Specialists: ${JSON.stringify(context.specialists || [])}
+</context>
 
-**Your role:**
-Analyze the task and decide on ONE of these actions:
-1. **EXECUTE** - Task is ready to execute by an agent
-2. **SPLIT** - Task is too complex and should be broken into subtasks
-3. **DEFER** - Not ready yet, defer to later (explain why)
+<instructions>
+1. **THINK FIRST**: Output a <thinking> block. Analyze the requirements, architecture, dependencies, and risks. Plan the sequence of operations.
+2. **DESIGN THE CONTRACT**: For the Team Lead, you must define:
+   - **Strategy**: How should they approach this?
+   - **Subtasks**: If complex, break it down sequentially.
+   - **Roles**: Which specialists (from context) are best suited?
 
-**Analysis criteria:**
-- Complexity: Is this simple, moderate, complex, or epic?
-- Clarity: Are requirements clear enough to execute?
-- Scope: Is it a single focused task or multiple tasks?
-- Dependencies: Any blockers or prerequisites?
-- Effort: Estimated time/difficulty?
+3. **DECIDE**:
+   - **EXECUTE**: If it's a single, cohesive unit of work.
+   - **SPLIT**: If it requires distinct phases (e.g., "Design -> Backend -> Frontend").
+   - **DEFER**: Only if resources are critical.
+</instructions>
 
-Respond in JSON format:
+<output_format>
+Return strictly JSON (after your thinking block):
 {
-  "action": "EXECUTE|SPLIT|DEFER",
-  "complexity": "simple|moderate|complex|epic",
-  "reasoning": "2-3 sentences explaining your decision",
-  "recommendedProvider": "claude|gemini|codex",
-  "confidence": 0-100,
-  "estimatedMessages": 5-50,
-  "riskFactors": ["list", "of", "risks"],
-  "shouldSplit": true/false,
-  "splitReason": "if shouldSplit is true, explain why"
-}`;
+  "action": "execute" | "split" | "defer",
+  "reasoning": "Strategic justification...",
+  "complexity": "simple" | "moderate" | "complex" | "epic",
+  "interactionDepth": "one-shot" | "conversation",
+  "confidence": number,
+  "strategy_note": "High-level architectural guidance for the Team Lead",
+  "subtasks": [ // REQUIRED if action is "split"
+    {
+      "title": "Clear Actionable Title",
+      "objective": "What is the goal?",
+      "inputs": "What data/files are needed? (e.g., Output of Task 1)",
+      "guidelines": "Specific rules, constraints, or tech stack requirements",
+      "expectedOutput": "Exact definition of done (e.g., 'schema.sql file with indexes')",
+      "roles": ["List", "of", "relevant", "specialists"]
+    }
+  ]
+}
+</output_format>
+    `.trim();
 
     try {
       // Call AI model for analysis

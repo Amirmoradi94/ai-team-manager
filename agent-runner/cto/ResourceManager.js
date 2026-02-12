@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
+const os = require('os');
 const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
@@ -45,67 +46,256 @@ class ResourceManager {
     // Real-time data from external monitors
     this.externalState = {
       claude: null,
-      gemini: null
+      gemini: null,
+      codex: null
     };
   }
 
   async checkExternalStatus() {
-    // 1. Check Claude via cusage (Main Stats)
+    console.log('[ResourceManager] Starting external status check...');
+    
+    // 1. Check Claude Authentication
+    await this._checkClaudeAuth();
+    
+    // 2. Check Gemini Authentication
+    await this._checkGeminiAuth();
+    
+    // 3. Check Codex Authentication
+    await this._checkCodexAuth();
+  }
+
+  /**
+   * Check Claude CLI authentication status
+   */
+  async _checkClaudeAuth() {
     try {
-      const { stdout: usageOut } = await execPromise('ccusage daily --json');
-      const data = JSON.parse(usageOut);
-      const today = new Date().toISOString().split('T')[0];
-      const todayData = data.daily.find(d => d.date === today);
+      // 1. Direct File Check (~/.claude.json) - Highest Reliability
+      try {
+        const homeDir = os.homedir();
+        const claudeConfigPath = path.join(homeDir, '.claude.json');
+        const configData = await fs.readFile(claudeConfigPath, 'utf-8');
+        const config = JSON.parse(configData);
+        
+        if (config.hasAvailableSubscription === false) {
+          console.log('[ResourceManager] Claude Subscription: NOT AVAILABLE (detected in .claude.json)');
+          this.externalState.claudeAuth = { needsAuth: true, reason: 'Subscription required', updatedAt: Date.now() };
+          this.externalState.claude = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
+          return; // Exit early, no need to run CLI
+        }
+      } catch (fileError) {
+        // File not found or unreadable, continue to CLI check
+      }
+
+      // 2. CLI Check (Fallback)
+      // Try a simple, quick command to test authentication
+      // Using --version or help to check if authenticated
+      const { stdout, stderr } = await execPromise('claude --version', { timeout: 5000 });
+      const output = (stdout + stderr).toLowerCase();
       
-      if (todayData) {
-        this.externalState.claudeStats = {
-          tokens: todayData.totalTokens,
-          cost: todayData.totalCost,
+      // Check for authentication errors
+      if (output.includes('401') || 
+          output.includes('unauthorized') || 
+          output.includes('not authenticated') ||
+          output.includes('please log in') ||
+          output.includes('login') ||
+          output.includes('session expired') ||
+          output.includes('reauthenticate')) {
+        this.externalState.claudeAuth = { needsAuth: true, reason: 'Claude not authenticated', updatedAt: Date.now() };
+      } else {
+        // Claude is authenticated - now try to get usage info via cmonitor
+        this.externalState.claudeAuth = { needsAuth: false, updatedAt: Date.now() };
+        
+        try {
+          const { stdout: monitorOut } = await execPromise('cmonitor --refresh-rate 1 --log-level INFO', { timeout: 5000 });
+          const lines = monitorOut.split('\n');
+          let synced = false;
+          
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('Messages Usage:')) {
+              const dataLine = lines[i+1];
+              if (dataLine) {
+                const match = dataLine.match(/([\d.]+)%\s+(\d+)\s*\/\s*(\d+)/);
+                if (match) {
+                  const used = parseInt(match[2]);
+                  const total = parseInt(match[3]);
+                  this.externalState.claude = {
+                    remaining5h: Math.max(0, total - used),
+                    remainingDay: Math.max(0, total - used),
+                    updatedAt: Date.now()
+                  };
+                  synced = true;
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (!synced) throw new Error('Could not parse cmonitor output');
+          
+        } catch (monitorError) {
+          // Fallback to default pro values if cmonitor fails
+          this.externalState.claude = {
+            remaining5h: 45,
+            remainingDay: 216,
+            updatedAt: Date.now()
+          };
+        }
+      }
+    } catch (error) {
+      const errorMsg = error.message.toLowerCase();
+      
+      // Check if it's an authentication issue
+      if (errorMsg.includes('401') || 
+          errorMsg.includes('unauthorized') ||
+          errorMsg.includes('not authenticated') ||
+          errorMsg.includes('login') ||
+          errorMsg.includes('session') ||
+          errorMsg.includes('reauth')) {
+        this.externalState.claudeAuth = { needsAuth: true, reason: 'Claude session expired or not logged in', updatedAt: Date.now() };
+      } else if (errorMsg.includes('not found') || errorMsg.includes('command not found')) {
+        this.externalState.claudeAuth = { needsAuth: true, reason: 'Claude CLI not installed', updatedAt: Date.now() };
+      } else {
+        // Unknown error - assume auth issue to prompt user
+        this.externalState.claudeAuth = { needsAuth: true, reason: 'Unable to verify Claude authentication', updatedAt: Date.now() };
+      }
+      this.externalState.claude = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
+    }
+  }
+
+  /**
+   * Check Gemini CLI authentication status
+   */
+  async _checkGeminiAuth() {
+    try {
+      // Try gemini --version to check if authenticated
+      const { stdout, stderr } = await execPromise('gemini --version', { timeout: 5000 });
+      const output = (stdout + stderr).toLowerCase();
+      
+      // Gemini version command works, but we need to check if authenticated for actual usage
+      // Try a simple prompt to test authentication
+      try {
+        const { stdout: testOut, stderr: testErr } = await execPromise(
+          'echo "test" | gemini -p "respond with only the word OK"',
+          { timeout: 8000, maxBuffer: 1024 }
+        );
+        const testOutput = (testOut + testErr).toLowerCase();
+        
+        if (testOutput.includes('ok') || 
+            (!testOutput.includes('401') && !testOutput.includes('unauthorized') && !testOutput.includes('error'))) {
+          // Gemini is working - set default healthy status
+          // Gemini CLI doesn't expose usage limits directly, so we assume healthy
+          this.externalState.geminiAuth = { needsAuth: false, updatedAt: Date.now() };
+          this.externalState.gemini = {
+            remaining5h: 1000, // Infinite for practical purposes
+            remainingDay: 500, // Ultra plan daily limit
+            updatedAt: Date.now()
+          };
+        } else if (testOutput.includes('401') || 
+                   testOutput.includes('unauthorized') || 
+                   testOutput.includes('not authenticated') ||
+                   testOutput.includes('authentication') ||
+                   testOutput.includes('please log in') ||
+                   testOutput.includes('login')) {
+          this.externalState.geminiAuth = { needsAuth: true, reason: 'Gemini not authenticated', updatedAt: Date.now() };
+          this.externalState.gemini = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
+        }
+      } catch (testError) {
+        const testErrorMsg = testError.message.toLowerCase();
+        if (testErrorMsg.includes('401') || 
+            testErrorMsg.includes('unauthorized') ||
+            testErrorMsg.includes('not authenticated') ||
+            testErrorMsg.includes('authentication') ||
+            testErrorMsg.includes('login') ||
+            testErrorMsg.includes('session')) {
+          this.externalState.geminiAuth = { needsAuth: true, reason: 'Gemini session expired or not logged in', updatedAt: Date.now() };
+        } else if (testErrorMsg.includes('not found') || testErrorMsg.includes('command not found')) {
+          this.externalState.geminiAuth = { needsAuth: true, reason: 'Gemini CLI not installed', updatedAt: Date.now() };
+        } else {
+          // Other errors - might be rate limit or temporary, assume healthy
+          this.externalState.geminiAuth = { needsAuth: false, updatedAt: Date.now() };
+          this.externalState.gemini = {
+            remaining5h: 1000,
+            remainingDay: 500,
+            updatedAt: Date.now()
+          };
+        }
+      }
+    } catch (error) {
+      const errorMsg = error.message.toLowerCase();
+      
+      if (errorMsg.includes('401') || 
+          errorMsg.includes('unauthorized') ||
+          errorMsg.includes('not authenticated') ||
+          errorMsg.includes('authentication') ||
+          errorMsg.includes('login') ||
+          errorMsg.includes('session')) {
+        this.externalState.geminiAuth = { needsAuth: true, reason: 'Gemini session expired or not logged in', updatedAt: Date.now() };
+      } else if (errorMsg.includes('not found') || errorMsg.includes('command not found')) {
+        this.externalState.geminiAuth = { needsAuth: true, reason: 'Gemini CLI not installed', updatedAt: Date.now() };
+      } else {
+        // Unknown error - assume healthy but log warning
+        this.externalState.geminiAuth = { needsAuth: false, updatedAt: Date.now() };
+        this.externalState.gemini = {
+          remaining5h: 1000,
+          remainingDay: 500,
           updatedAt: Date.now()
         };
       }
-    } catch (e) {
-      // console.log('[ResourceManager] ccusage failed');
+      this.externalState.gemini = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
     }
+  }
 
-    // 2. Check Claude via cmonitor (Safety Switch & Session Limits)
+  /**
+   * Check Codex CLI authentication status
+   */
+  async _checkCodexAuth() {
     try {
-      const { stdout } = await execPromise('timeout 3 cmonitor --refresh-rate 1 --log-level INFO || true');
+      // Try a simple command to check if Codex is available and authenticated
+      // Codex CLI might be 'codex' or part of OpenAI CLI
+      const { stdout, stderr } = await execPromise('which codex 2>/dev/null || echo "not-found"', { timeout: 3000 });
       
-      const lines = stdout.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes('Messages Usage:')) {
-          const dataLine = lines[i+1];
-          const match = dataLine.match(/([\d.]+)%\s+(\d+)\s*\/\s*(\d+)/);
-          if (match) {
-            const used = parseInt(match[2]);
-            const total = parseInt(match[3]);
-            this.externalState.claude = {
-              remaining5h: Math.max(0, total - used),
-              remainingDay: Math.max(0, total - used),
-              updatedAt: Date.now()
-            };
-            break;
-          }
-        }
+      if (stdout.includes('not-found')) {
+        this.externalState.codexAuth = { needsAuth: true, reason: 'Codex CLI not installed', updatedAt: Date.now() };
+        this.externalState.codex = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
+        return;
       }
 
-      if (stdout.includes('exceeded the maximum cost limit')) {
-        this.externalState.claudePressure = 'high';
+      // Try to execute a simple test
+      const { stdout: testOut, stderr: testErr } = await execPromise('codex --version 2>&1', { timeout: 3000 });
+      const output = (testOut + testErr).toLowerCase();
+      
+      if (output.includes('401') || 
+          output.includes('unauthorized') ||
+          output.includes('not authenticated') ||
+          output.includes('authentication') ||
+          output.includes('login')) {
+        this.externalState.codexAuth = { needsAuth: true, reason: 'Codex not authenticated', updatedAt: Date.now() };
       } else {
-        this.externalState.claudePressure = 'normal';
+        this.externalState.codexAuth = { needsAuth: false, updatedAt: Date.now() };
+        // Set default values for Codex
+        this.externalState.codex = {
+          remaining5h: 90,
+          remainingDay: Infinity,
+          updatedAt: Date.now()
+        };
       }
-    } catch (e) {
-      // console.log('[ResourceManager] cmonitor sync error');
-    }
-
-    // 2. Check Gemini via gcloud or gemini-monitor
-    try {
-      // Placeholder for actual Gemini monitor command
-      // Example: const { stdout } = await execPromise('gcloud alpha gemini quota list --format=json');
-      // For now, we simulate or use a generic check if available
-    } catch (e) {
-      // console.log('[ResourceManager] Gemini monitor not available');
+    } catch (error) {
+      const errorMsg = error.message.toLowerCase();
+      
+      if (errorMsg.includes('401') || 
+          errorMsg.includes('unauthorized') ||
+          errorMsg.includes('not authenticated') ||
+          errorMsg.includes('authentication') ||
+          errorMsg.includes('login') ||
+          errorMsg.includes('session')) {
+        this.externalState.codexAuth = { needsAuth: true, reason: 'Codex session expired or not logged in', updatedAt: Date.now() };
+      } else if (errorMsg.includes('not found') || errorMsg.includes('command not found')) {
+        this.externalState.codexAuth = { needsAuth: true, reason: 'Codex CLI not installed', updatedAt: Date.now() };
+      } else {
+        // Other errors - assume needs auth to prompt user
+        this.externalState.codexAuth = { needsAuth: true, reason: 'Unable to verify Codex status', updatedAt: Date.now() };
+      }
+      this.externalState.codex = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
     }
   }
 
@@ -140,10 +330,12 @@ class ResourceManager {
       }
       this._pruneOldEntries();
       await this.checkExternalStatus();
+      await this.persistState(); // Persist immediately after first check
     } catch (e) {
       // No state file yet, start fresh
       this.usageLog = [];
       await this.checkExternalStatus();
+      await this.persistState();
     }
   }
 
@@ -176,9 +368,9 @@ class ResourceManager {
       const status = this.checkAvailability(provider);
       lines.push(`### ${provider} (${this.subscriptions[provider]})`);
       lines.push(`- Available: ${status.available}`);
-      lines.push(`- 5h remaining: ${status.remaining5h}`);
-      lines.push(`- Day remaining: ${status.remainingDay}`);
-      lines.push(`- Window resets in: ${Math.round(status.windowResetIn / 60000)}min`);
+      lines.push(`- 5h remaining: ${status.remaining5h || 0}`);
+      lines.push(`- Day remaining: ${status.remainingDay || 0}`);
+      lines.push(`- Window resets in: ${Math.round((status.windowResetIn || 0) / 60000)}min`);
       lines.push('');
     }
 
@@ -195,40 +387,47 @@ class ResourceManager {
 
     const now = Date.now();
     
-    // Use external ground truth if fresh (< 15 mins)
-    if (this.externalState[provider] && (now - this.externalState[provider].updatedAt < 15 * 60 * 1000)) {
-      const ext = this.externalState[provider];
-      const isOverBudget = provider === 'claude' && this.externalState.claudePressure === 'high';
-      
+    // 1. Check for Auth issues (Highest Priority)
+    const authState = this.externalState[`${provider}Auth`];
+    if (authState?.needsAuth) {
       return {
-        available: ext.remainingDay > 0 && !isOverBudget,
-        remaining5h: ext.remaining5h,
-        remainingDay: ext.remainingDay,
-        windowResetIn: 0, // We don't have precise reset time from text parse yet
-        reason: isOverBudget ? 'Cost limit exceeded' : (ext.remainingDay <= 0 ? 'No messages left' : ''),
+        available: false,
+        needsAuth: true,
+        remaining5h: 0,
+        remainingDay: 0,
+        windowResetIn: 0,
+        reason: 'Authentication required',
         source: 'external'
       };
     }
+
     const reserved = this._getReserved(provider);
 
-    // Use external monitor data if fresh (< 15 mins)
+    // 2. Use external ground truth if fresh (< 15 mins)
     const ext = this.externalState[provider];
     if (ext && (now - ext.updatedAt < 15 * 60 * 1000)) {
-      const remaining5h = Math.max(0, ext.remaining5h - reserved);
-      const remainingDay = Math.max(0, ext.remainingDay - reserved);
-      const available = remaining5h > 0 && remainingDay > 0;
+      const isOverBudget = provider === 'claude' && this.externalState.claudePressure === 'high';
       
-      return { 
-        available, 
-        remaining5h, 
-        remainingDay, 
-        windowResetIn: 0, // External monitor usually doesn't give precise reset time
-        reason: available ? '' : 'External monitor reports limit reached',
+      const remaining5h = Math.max(0, (ext.remaining5h || 0) - reserved);
+      const remainingDay = Math.max(0, (ext.remainingDay || 0) - reserved);
+      
+      // FOR CLAUDE: Availability is based on CLI/Auth, not session limits (as requested)
+      // FOR OTHERS: Standard limit-based availability
+      const available = provider === 'claude' 
+        ? true 
+        : (remaining5h > 0 && remainingDay > 0 && !isOverBudget);
+
+      return {
+        available,
+        remaining5h,
+        remainingDay,
+        windowResetIn: 0, 
+        reason: isOverBudget ? 'Cost limit exceeded' : (available ? '' : 'External monitor reports limit reached'),
         source: 'external'
       };
     }
 
-    // Fallback to local tracking
+    // 3. Fallback to local tracking
     const used5h = this._getUsage(provider, now - FIVE_HOURS_MS, now);
     const usedDay = this._getUsage(provider, now - ONE_DAY_MS, now);
 

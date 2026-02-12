@@ -1,6 +1,8 @@
 const cron = require('node-cron');
 const express = require('express');
 const path = require('path');
+const { exec } = require('child_process');
+const ioClient = require('socket.io-client');
 const TaskManagerAPI = require('./task-manager-api');
 const AgentExecutor = require('./agent-executor');
 const config = require('./config.json');
@@ -13,8 +15,15 @@ class AgentRunner {
     this.executor = new AgentExecutor(this.taskAPI);
     this.app = express();
     this.scheduledJobs = new Map();
+    this.processedTaskIds = new Set();
     this.isPolling = false;
+    this.isReviewing = false;
     this.runnerToken = activeConfig.taskManagerAPI.projectToken || activeConfig.taskManagerAPI.runnerToken;
+
+    // Connect Socket.io for real-time commands
+    const serverUrl = activeConfig.taskManagerAPI.apiUrl.replace('/api', '');
+    this.socket = ioClient(serverUrl);
+    this.setupSocketHandlers();
 
     // CTO Intelligence Layer with AI-powered decision-making
     this.cto = activeConfig.cto?.enabled
@@ -25,6 +34,30 @@ class AgentRunner {
           this.executor  // Pass executor so CTO can use AI models
         )
       : null;
+  }
+
+  setupSocketHandlers() {
+    this.socket.on('connect', () => console.log('[Socket] Connected to server'));
+    
+    // Command: Open Terminal (for Auth/Login)
+    this.socket.on('command:open-terminal', (data) => {
+      // Prevent multiple triggers in short succession
+      const now = Date.now();
+      if (this.lastTerminalTrigger && (now - this.lastTerminalTrigger < 5000)) {
+        return;
+      }
+      this.lastTerminalTrigger = now;
+
+      console.log(`[Socket] Received command to open terminal: ${data.command}`);
+      
+      // macOS specific command to open a visible terminal and run a command
+      const cmd = `osascript -e 'tell application "Terminal" to do script "${data.command}"' -e 'tell application "Terminal" to activate'`;
+      
+      exec(cmd, (error) => {
+        if (error) console.error(`[Command] Failed to open terminal: ${error.message}`);
+        else console.log(`[Command] Terminal opened for ${data.command}`);
+      });
+    });
   }
 
   /**
@@ -96,7 +129,11 @@ class AgentRunner {
     console.log('📡 Polling for tasks...');
     setInterval(() => this.pollForTasks(), 10000);
 
-    // 6. Start Webhook Server (optional fallback)
+    // 6. Start Review Watcher (every 30s)
+    console.log('👁️  Watching for tasks needing review...');
+    setInterval(() => this.reviewTasks(), 30000);
+
+    // 7. Start Webhook Server (optional fallback)
     console.log('[Debug] Starting webhook server...');
     this.startWebhookServer();
 
@@ -152,10 +189,12 @@ class AgentRunner {
       const tasks = await this.taskAPI.getRunnerTasks(this.runnerToken);
 
       for (const task of tasks) {
-        console.log(`\n[Runner] New task detected: ${task.title}`);
-        console.log(`[Runner] Project: ${task.project_name || 'Unknown'}`);
-        console.log(`[Runner] Switching to: ${task.project_repository_path || process.cwd()}`);
+        // Skip if already being processed or scheduled in this runner instance
+        if (this.processedTaskIds.has(task.id)) continue;
 
+        console.log(`\n[Runner] New task detected: ${task.title}`);
+        
+        // ... (rest of the directory switching logic)
         // Switch to project directory
         if (task.project_repository_path) {
           try {
@@ -176,6 +215,22 @@ class AgentRunner {
         if (this.cto && this.cto.enabled) {
           const decision = await this.cto.evaluate(payload.task, payload);
           console.log(`[CTO] Decision: ${decision.action} | Reason: ${decision.reason}`);
+
+          // SCHEDULE: CEO manually set a time, or CTO deferred.
+          if (decision.action === 'schedule') {
+            const delay = decision.scheduledAt.getTime() - Date.now();
+            console.log(`[CTO] Task "${task.title}" queued for execution at ${decision.scheduledAt.toLocaleString()} (${Math.round(delay/1000/60)}m from now)`);
+            
+            this.processedTaskIds.add(task.id);
+            
+            setTimeout(async () => {
+              console.log(`\n[CTO] Scheduled time reached for task: ${task.title}`);
+              this.processedTaskIds.delete(task.id); // Remove from set so we can process it
+              await this.pollForTasks(); // Re-poll to trigger immediate execution
+            }, Math.max(0, delay));
+            
+            continue;
+          }
 
           // SPLIT: Create subtasks, mark parent as epic, skip to next
           if (decision.action === 'split') {
@@ -364,6 +419,30 @@ class AgentRunner {
     }
   }
 
+  async reviewTasks() {
+    if (this.isReviewing || !this.cto) return;
+    this.isReviewing = true;
+
+    try {
+      const projects = await this.taskAPI.getRunnerProjects(this.runnerToken);
+      for (const project of projects) {
+        const tasks = await this.taskAPI.getTasksByStatus(project.id, 'for-review');
+        for (const task of tasks) {
+          // Only review if it was a subtask or delegated by CTO
+          if (task.task_type !== 'subtask' && !task.parent_id) continue;
+          
+          console.log(`[CTO] Watcher: Reviewing task "${task.title}"...`);
+          const payload = await this.taskAPI.getRunnerPayload(task.id);
+          await this.cto.reviewTask(task, payload);
+        }
+      }
+    } catch (e) {
+      // console.error('[Review] Watcher error:', e.message);
+    } finally {
+      this.isReviewing = false;
+    }
+  }
+
   startWebhookServer() {
     // Webhook server is optional - polling is the primary mechanism
     const webhookPort = config.webhook?.port || 3002;
@@ -371,17 +450,56 @@ class AgentRunner {
     this.app.use(express.json());
     this.app.post('/webhook/task-assigned', async (req, res) => {
       const webhookData = req.body;
-      console.log(`[Webhook] Immediate task received: ${webhookData.title}`);
+      const action = webhookData.action || 'task_assigned';
+      
+      console.log(`[Webhook] Received event: ${action} for task "${webhookData.title}"`);
       res.json({ success: true });
 
+      // Handle Review Requests (Async Ping-Pong)
+      if (action === 'review_requested' && this.cto) {
+        console.log(`[Webhook] Triggering instant CTO review...`);
+        const payload = await this.taskAPI.getRunnerPayload(webhookData.id);
+        const fullTask = await this.taskAPI.getTask(webhookData.id);
+        if (fullTask) {
+          await this.cto.reviewTask(fullTask, payload);
+        }
+        return;
+      }
+
+      // Handle Clarification Requests
+      if (action === 'comment_added' && this.cto) {
+        const comments = await this.taskAPI.getComments(webhookData.id);
+        const latestComment = comments[comments.length - 1];
+        
+        // If comment starts with "CTO," trigger clarification logic
+        if (latestComment && latestComment.content.trim().toUpperCase().startsWith('CTO,')) {
+          console.log(`[Webhook] CTO Clarification requested for task: ${webhookData.title}`);
+          const payload = await this.taskAPI.getRunnerPayload(webhookData.id);
+          await this.cto.handleClarification(webhookData.id, latestComment.content, payload);
+        }
+        return;
+      }
+
+      // Handle Standard Task Assignment (Execution)
       const payload = await this.taskAPI.getRunnerPayload(webhookData.id);
-      this.executor.executeKanbanTask(
-        payload.task,
-        payload.history,
-        payload.identity,
-        payload.specialists,
-        payload.project
-      );
+      
+      // Sync Runner Brain before executing
+      const projectInfo = await this.taskAPI.getProjectInfo(this.runnerToken, payload.project.id);
+      await this.executor.syncRunnerBrain(projectInfo.allSpecialists || [], projectInfo.teams || []);
+
+      if (this.cto && this.cto.enabled) {
+        // ... (CTO logic will be picked up by the next poll cycle or we can trigger it here)
+        // For now, let's trigger a poll immediately to handle it uniformly
+        this.pollForTasks(); 
+      } else {
+        this.executor.executeKanbanTask(
+          payload.task,
+          payload.history,
+          payload.identity,
+          payload.specialists,
+          payload.project
+        );
+      }
     });
 
     const server = this.app.listen(webhookPort)

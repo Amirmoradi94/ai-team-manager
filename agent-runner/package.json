@@ -10,7 +10,7 @@
     "start": "node agent-runner.js",
     "connect": "node bin/agent-runner.js connect",
     "dev": "node agent-runner.js",
-    "postinstall": "node scripts/setup-service.js",
+    "postinstall": "node scripts/check-dependencies.js && node scripts/setup-service.js",
     "preuninstall": "node scripts/remove-service.js"
   },
   "keywords": [
@@ -29,6 +29,6 @@
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
     "node-fetch": "^2.7.0",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.3"
   }
 }

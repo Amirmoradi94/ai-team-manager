@@ -1,6 +1,6 @@
 # Resource State
 
-> Last updated: 2026-02-13T12:55:55.416Z
+> Last updated: 2026-02-13T12:56:01.742Z
 
 ## Subscriptions
 
@@ -93,9 +93,9 @@
 - Window resets in: 0min
 
 ### gemini (ultra)
-- Available: true
-- 5h remaining: 100
-- Day remaining: 100
+- Available: false
+- 5h remaining: 0
+- Day remaining: 0
 - Window resets in: 0min
 
 ### codex (plus)

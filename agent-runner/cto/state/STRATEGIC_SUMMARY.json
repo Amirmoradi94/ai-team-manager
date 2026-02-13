@@ -1,10 +1,10 @@
 {
-  "totalTasks": 0,
-  "successRate": 0,
+  "totalTasks": 17,
+  "successRate": 64.70588235294117,
   "providerPerformance": {
     "claude": {
-      "total": 0,
-      "success": 0,
+      "total": 17,
+      "success": 11,
       "avgRetries": 0
     },
     "gemini": {
@@ -18,7 +18,34 @@
       "avgRetries": 0
     }
   },
-  "taskTypePatterns": {},
+  "taskTypePatterns": {
+    "coding": {
+      "total": 16,
+      "success": 10,
+      "bestProvider": "claude",
+      "avgRetries": 0,
+      "successRate": 62.5,
+      "providerStats": {
+        "claude": {
+          "total": 10,
+          "success": 10
+        }
+      }
+    },
+    "general": {
+      "total": 1,
+      "success": 1,
+      "bestProvider": "claude",
+      "avgRetries": 0,
+      "successRate": 100,
+      "providerStats": {
+        "claude": {
+          "total": 1,
+          "success": 1
+        }
+      }
+    }
+  },
   "epicCompletionRate": 0,
-  "lastUpdated": "2026-02-12T01:15:34.416Z"
+  "lastUpdated": "2026-02-13T12:22:02.156Z"
 }

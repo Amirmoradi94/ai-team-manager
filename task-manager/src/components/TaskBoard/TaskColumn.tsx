@@ -10,6 +10,7 @@ interface TaskColumnProps {
   tasks: Task[];
   onAddTask: (status: Status) => void;
   onTaskClick: (task: Task) => void;
+  onTaskDelete: (taskId: string) => void;
   onTaskMove?: (taskId: string, newStatus: Status) => void;
   currentUser?: User | null;
   isLocked?: boolean;
@@ -39,6 +40,7 @@ export function TaskColumn({
   tasks,
   onAddTask,
   onTaskClick,
+  onTaskDelete,
   onTaskMove,
   currentUser,
   isLocked
@@ -110,7 +112,7 @@ export function TaskColumn({
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.05 }}
           >
-            <TaskCard task={task} onClick={() => onTaskClick(task)} />
+            <TaskCard task={task} onClick={() => onTaskClick(task)} onDelete={onTaskDelete} />
           </motion.div>
         ))}
 

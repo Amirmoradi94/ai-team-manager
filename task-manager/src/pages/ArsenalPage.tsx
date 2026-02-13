@@ -33,7 +33,7 @@ interface Tool {
   icon?: string;
 }
 
-interface Specialist {
+interface Employee {
   id: string;
   name: string;
   description: string;
@@ -42,7 +42,7 @@ interface Specialist {
 export function ArsenalPage() {
   const [activeTab, setActiveTab] = useState<'market' | 'inventory' | 'allocation'>('market');
   const [deployedTools, setDeployedTools] = useState<Tool[]>([]);
-  const [specialists, setSpecialists] = useState<Specialist[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Acquisition Modal State
@@ -60,11 +60,11 @@ export function ArsenalPage() {
       const token = localStorage.getItem('token');
       const [toolsRes, specsRes] = await Promise.all([
         fetch(`${API_URL}/tools`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${API_URL}/specialists`, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${API_URL}/employees`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
       
       if (toolsRes.ok) setDeployedTools(await toolsRes.ok ? await toolsRes.json() : []);
-      if (specsRes.ok) setSpecialists(await specsRes.ok ? await specsRes.json() : []);
+      if (specsRes.ok) setEmployees(await specsRes.ok ? await specsRes.json() : []);
     } catch (e) {
       toast.error('Failed to sync arsenal data');
     } finally {
@@ -115,10 +115,10 @@ export function ArsenalPage() {
     }
   };
 
-  const equipSpecialist = async (specId: string, toolId: string) => {
+  const equipEmployee = async (specId: string, toolId: string) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/specialists/${specId}/equip`, {
+      const res = await fetch(`${API_URL}/employees/${specId}/equip`, {
         method: 'POST',
         headers: { 
           'Authorization': `Bearer ${token}`,
@@ -136,12 +136,32 @@ export function ArsenalPage() {
   };
 
   const marketplaceTools = [
+    // Growth & Intelligence
     { name: 'Firecrawl', type: 'mcp', description: 'Deep web scraping and data extraction for market intelligence.', command: 'npx @firecrawl/mcp-server' },
-    { name: 'Zyte', type: 'api', description: 'Advanced proxy and anti-bot bypassing for resilient scraping.', command: 'pip install zyte-api' },
-    { name: 'Slack', type: 'mcp', description: 'Channel-based communication and notification orchestration.', command: 'npx @slack/mcp-server' },
-    { name: 'GitHub', type: 'mcp', description: 'Version control and engineering workflow management.', command: 'npx @github/mcp-server' },
-    { name: 'Brave Search', type: 'mcp', description: 'Real-time search engine access without tracking.', command: 'npx @brave/mcp-server' },
-    { name: 'Google Sheets', type: 'api', description: 'Collaborative data management and reporting.', command: 'npx @google/mcp-sheets' }
+    { name: 'Zyte API', type: 'api', description: 'Advanced anti-bot bypassing for resilient scraping of complex directories.', command: 'pip install zyte-api' },
+    { name: 'Tavily', type: 'mcp', description: 'AI-native search engine for gathering verified facts and research data.', command: 'npx @tavily/mcp-server' },
+    { name: 'Hunter.io', type: 'api', description: 'Professional email discovery and domain verification engine.', command: 'npm install hunterio' },
+    { name: 'Exa Search', type: 'mcp', description: 'Neural search engine for finding companies and leads based on semantic meaning.', command: 'npx @exa/mcp-server' },
+    
+    // Engineering
+    { name: 'GitHub', type: 'mcp', description: 'Complete version control and engineering workflow management.', command: 'npx @github/mcp-server' },
+    { name: 'Docker', type: 'mcp', description: 'Container management and isolated testing environments.', command: 'npx @docker/mcp-server' },
+    { name: 'Supabase', type: 'mcp', description: 'Instant database, auth, and edge function orchestration.', command: 'npx @supabase/mcp-server' },
+    { name: 'Sentry', type: 'mcp', description: 'Real-time error tracking and performance monitoring integration.', command: 'npx @sentry/mcp-server' },
+    { name: 'Postgres', type: 'mcp', description: 'Direct SQL database query and schema management.', command: 'npx @postgres/mcp-server' },
+
+    // Strategy & Comm
+    { name: 'Linear', type: 'mcp', description: 'Professional issue tracking and project synchronization.', command: 'npx @linear/mcp-server' },
+    { name: 'Notion', type: 'mcp', description: 'Access to company wikis, documentation, and SOPs.', command: 'npx @notion/mcp-server' },
+    { name: 'Slack', type: 'mcp', description: 'Corporate communication and notification orchestration.', command: 'npx @slack/mcp-server' },
+    { name: 'BigQuery', type: 'api', description: 'Deep data warehouse analysis and complex SQL reporting.', command: 'pip install google-cloud-bigquery' },
+
+    // Content & Automation
+    { name: 'Jina Reader', type: 'api', description: 'Clean content extraction from URLs for high-quality summarization.', command: 'npm install @jina-ai/reader' },
+    { name: 'DeepL', type: 'api', description: 'Enterprise-grade neural translation for content localization.', command: 'npm install deepl-node' },
+    { name: 'Google Sheets', type: 'mcp', description: 'Collaborative data management and lead-list reporting.', command: 'npx @google/mcp-sheets' },
+    { name: 'Zapier', type: 'api', description: 'Workflow automation across 6,000+ business applications.', command: 'npm install zapier-platform-core' },
+    { name: 'Puppeteer', type: 'mcp', description: 'Headless browser orchestration for complex web interactions.', command: 'npx @puppeteer/mcp-server' }
   ];
 
   return (
@@ -270,7 +290,7 @@ export function ArsenalPage() {
         {activeTab === 'allocation' && (
           <div className="max-w-6xl mx-auto">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {specialists.map(spec => (
+              {employees.map(spec => (
                 <div key={spec.id} className="p-8 rounded-3xl bg-background border border-border shadow-sm flex flex-col gap-6">
                   <div className="flex items-center gap-4 border-b border-border pb-6">
                     <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-inner">
@@ -288,7 +308,7 @@ export function ArsenalPage() {
                       {deployedTools.map(tool => (
                         <button 
                           key={tool.id}
-                          onClick={() => equipSpecialist(spec.id, tool.id)}
+                          onClick={() => equipEmployee(spec.id, tool.id)}
                           className="flex items-center justify-between p-4 rounded-xl border border-border bg-secondary/5 hover:bg-secondary/20 hover:border-primary/30 transition-all text-left group"
                         >
                           <div className="flex items-center gap-3">

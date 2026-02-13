@@ -125,14 +125,14 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
                       </div>
                     </section>
 
-                    {/* Team Roles Section */}
+                    {/* Team Employees Section */}
                     <section className="space-y-4">
                       <h3 className="text-lg font-semibold text-foreground flex items-center gap-2 border-b border-border pb-2">
                         <Cpu className="w-5 h-5 text-primary" />
-                        Team Roles ({team.specialists?.length || 0})
+                        Team Employees ({team.employees?.length || 0})
                       </h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {team.specialists?.map((spec: any) => (
+                        {team.employees?.map((spec: any) => (
                           <div key={spec.id} className="p-4 rounded-xl border border-border bg-secondary/20 hover:border-primary/30 transition-colors group">
                             <h4 className="font-semibold text-foreground mb-1 group-hover:text-primary transition-colors">{capitalize(spec.name)}</h4>
                             <p className="text-xs text-muted-foreground line-clamp-2 italic">"{spec.description}"</p>
@@ -149,8 +149,8 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
                             </div>
                           </div>
                         ))}
-                        {(!team.specialists || team.specialists.length === 0) && (
-                          <p className="text-sm text-muted-foreground italic">No roles assigned to this team yet.</p>
+                        {(!team.employees || team.employees.length === 0) && (
+                          <p className="text-sm text-muted-foreground italic">No employees assigned to this team yet.</p>
                         )}
                       </div>
                     </section>
@@ -184,21 +184,21 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
                           </div>
 
                           {/* Vertical connector line */}
-                          {team.specialists && team.specialists.length > 0 && (
+                          {team.employees && team.employees.length > 0 && (
                             <div className="absolute left-1/2 top-full w-0.5 h-12 bg-gradient-to-b from-primary/50 to-transparent transform -translate-x-1/2" />
                           )}
                         </div>
                       </motion.div>
 
-                      {/* Team Roles */}
-                      {team.specialists && team.specialists.length > 0 ? (
+                      {/* Team Employees */}
+                      {team.employees && team.employees.length > 0 ? (
                         <div className="relative">
                           {/* Horizontal connector line */}
                           <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
 
-                          {/* Roles Grid */}
+                          {/* Employees Grid */}
                           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mt-8">
-                            {team.specialists.map((spec: any, index: number) => (
+                            {team.employees.map((spec: any, index: number) => (
                               <motion.div
                                 key={spec.id}
                                 initial={{ opacity: 0, y: 20 }}
@@ -240,7 +240,7 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
                         </div>
                       ) : (
                         <div className="text-center py-12">
-                          <p className="text-muted-foreground italic">No roles assigned to this team yet.</p>
+                          <p className="text-muted-foreground italic">No employees assigned to this team yet.</p>
                         </div>
                       )}
                     </div>

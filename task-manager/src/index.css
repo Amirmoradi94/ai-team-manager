@@ -133,14 +133,37 @@
     text-wrap: balance;
   }
 
-  /* Custom Scrollbar - Hidden */
-  .custom-scrollbar {
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE/Edge */
+  /* Themed Scrollbar - Global */
+  * {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: hsl(var(--border)) transparent;
   }
 
-  .custom-scrollbar::-webkit-scrollbar {
-    display: none; /* Chrome/Safari/Opera */
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  *:hover::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground));
+  }
+
+  /* Themed Scrollbar - Utility */
+  .custom-scrollbar,
+  .themed-scrollbar {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: hsl(var(--border)) transparent;
   }
 
   /* Markdown prose styles for dark mode */

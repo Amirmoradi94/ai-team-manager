@@ -1,0 +1,1 @@
+import { twoFactor } from "better-auth/plugins/two-factor"

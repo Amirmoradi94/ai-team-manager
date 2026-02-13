@@ -8,20 +8,134 @@
  * - Smart verification
  */
 
+const fs = require('fs').promises;
+const path = require('path');
+const os = require('os');
+const OpenAI = require('openai');
+
 class AIDecisionEngine {
   constructor(modelSelector, agentExecutor) {
     this.modelSelector = modelSelector;
     this.agentExecutor = agentExecutor;
+    this.systemPromptPath = path.join(os.homedir(), 'mycompany', 'cto', 'SYSTEM_PROMPT.md');
+    this.companyDir = path.join(os.homedir(), 'mycompany');
+  }
+
+  /**
+   * Read system prompt from mycompany directory
+   */
+  async getSystemPrompt() {
+    try {
+      const content = await fs.readFile(this.systemPromptPath, 'utf-8');
+      return content;
+    } catch (error) {
+      console.warn('[CTO] Could not read system prompt from file, using fallback');
+      return this._getFallbackPrompt();
+    }
+  }
+
+  /**
+   * Read context files from mycompany directory
+   */
+  async getCompanyContext() {
+    try {
+      const context = {
+        organization: '',
+        employees: '',
+        teams: '',
+        projects: ''
+      };
+
+      // Read organization overview
+      try {
+        context.organization = await fs.readFile(
+          path.join(this.companyDir, 'organization', 'OVERVIEW.md'),
+          'utf-8'
+        );
+      } catch (e) { /* skip if missing */ }
+
+      // Read employees index
+      try {
+        context.employees = await fs.readFile(
+          path.join(this.companyDir, 'employees', 'INDEX.md'),
+          'utf-8'
+        );
+      } catch (e) { /* skip if missing */ }
+
+      // Read teams overview
+      try {
+        context.teams = await fs.readFile(
+          path.join(this.companyDir, 'organization', 'TEAMS.md'),
+          'utf-8'
+        );
+      } catch (e) { /* skip if missing */ }
+
+      return context;
+    } catch (error) {
+      console.warn('[CTO] Could not read company context:', error.message);
+      return {};
+    }
+  }
+
+  async getPreviousAttempts(task, context = {}) {
+    const historyPath = path.join(os.homedir(), 'mycompany', 'cto', 'TASK_HISTORY.md');
+    const teamId = context.team?.id || null;
+    const teamName = context.team?.name || null;
+    try {
+      const content = await fs.readFile(historyPath, 'utf-8');
+      const lines = content.split('\n');
+      const records = [];
+      for (const line of lines) {
+        if (!line.startsWith('| ') || line.includes('taskId')) continue;
+        const parts = line.split('|').map(s => s.trim()).filter(Boolean);
+        if (parts.length < 6) continue;
+        records.push({
+          taskId: parts[0],
+          title: parts[1],
+          type: parts[2],
+          provider: parts[3],
+          outcome: parts[4],
+          reason: parts[5],
+          timestamp: parts[6] || '',
+          recTeamId: parts[7] || '',
+          recTeamName: parts[8] || ''
+        });
+      }
+
+      const title = (task.title || '').toLowerCase();
+      const matches = records.filter(r => {
+        const rTitle = (r.title || '').toLowerCase();
+        const titleMatch = title.includes(rTitle) || rTitle.includes(title);
+        if (!titleMatch) return false;
+        if (teamId || teamName) {
+          const idMatch = teamId && r.recTeamId && r.recTeamId === teamId;
+          const nameMatch = teamName && r.recTeamName && r.recTeamName.toLowerCase() === teamName.toLowerCase();
+          return idMatch || nameMatch;
+        }
+        return false;
+      });
+
+      return matches.slice(-5);
+    } catch (error) {
+      return [];
+    }
+  }
+
+  _getFallbackPrompt() {
+    return `
+You are the Chief Technology Officer (CTO). You design solutions and delegate execution to Team Leads.
+Analyze tasks and return JSON with: action (execute/split/defer), reasoning, complexity, and subtasks if splitting.
+    `.trim();
   }
 
   /**
    * Use AI to analyze task complexity and recommend action
-   * @param {object} task - { title, description }
-   * @param {object} context - { availableProviders, resourceStatus, historicalData }
+   * @param {object} task - Full task object with all metadata
+   * @param {object} context - { availableProviders, resourceStatus, historicalData, employees, deadline }
    * @returns {object} { action, reasoning, confidence, complexity }
    */
   async analyzeTask(task, context = {}) {
-    const { title, description } = task;
+    const { title, description, id, created_at, due_date, scheduled_date, scheduled_time, project_id, team_id } = task;
 
     // Select best AI model for this analysis
     const modelSelection = this.modelSelector.selectModel('high');
@@ -31,64 +145,85 @@ class AIDecisionEngine {
       return null; // Will use fallback logic
     }
 
-    console.log(`[CTO] Using ${modelSelection.model} for task analysis...`);
+    if (modelSelection.provider === 'gemini') {
+      console.log('[CTO] Using gemini for task analysis...');
+    } else {
+      console.log(`[CTO] Using ${modelSelection.model} for task analysis...`);
+    }
+
+    // Read system prompt from file
+    const systemPrompt = await this.getSystemPrompt();
+
+    // Read company context from mycompany directory
+    const companyContext = await this.getCompanyContext();
+
+    // Calculate time context
+    const now = new Date();
+    const createdDate = created_at ? new Date(created_at) : now;
+    const deadlineDate = due_date ? new Date(due_date) : context.deadline;
+    const scheduledDateTime = scheduled_date && scheduled_time
+      ? new Date(`${scheduled_date}T${scheduled_time}`)
+      : null;
+
+    const timeUntilDeadline = deadlineDate
+      ? Math.round((deadlineDate - now) / (1000 * 60 * 60)) // hours
+      : null;
+
+    const previousAttempts = await this.getPreviousAttempts(task, context);
+    const previousAttemptsBlock = previousAttempts.length > 0
+      ? previousAttempts.map(a => `- ${a.timestamp} | ${a.outcome} | ${a.provider} | ${a.reason}`).join('\n')
+      : 'None found for this team/task.';
+
+    const workloadLine = context.activeTasksUntilDeadline === null || context.activeTasksUntilDeadline === undefined
+      ? 'Unknown'
+      : String(context.activeTasksUntilDeadline);
 
     const prompt = `
-<cto_role>
-You are the **Chief Technology Officer (CTO)** powered by an advanced reasoning engine (Claude Opus 4.5 / Gemini 3 Pro).
-Your job is **STRATEGIC ARCHITECTURE & ORCHESTRATION**.
+${systemPrompt}
 
-You do not write code. You design the solution and **DELEGATE** execution to your Team Lead.
-You must use your **THINKING CAPABILITIES** to plan a robust, production-grade implementation.
-</cto_role>
+---
 
-<task>
-Title: ${title}
-Description: ${description || 'No description provided'}
-Project: ${task.project_name || 'Unknown'}
-</task>
+## Task Details
 
-<context>
-Available Providers: ${context.availableProviders?.join(', ') || 'claude, gemini, codex'}
-Resources: ${JSON.stringify(context.resourceStatus || {}).substring(0, 200)}
-History: ${JSON.stringify(context.historicalData)}
-Available Specialists: ${JSON.stringify(context.specialists || [])}
-</context>
+**Title:** ${title}
+**Description:** ${description || 'No description provided'}
+**Task ID:** ${id}
+**Created:** ${createdDate.toISOString()}
+${deadlineDate ? `**Deadline:** ${deadlineDate.toISOString()} (${timeUntilDeadline} hours from now)` : ''}
+${scheduledDateTime ? `**Scheduled For:** ${scheduledDateTime.toISOString()}` : ''}
+**Project ID:** ${project_id || 'None'}
+**Team ID:** ${team_id || 'None'}
+**Priority:** ${task.priority || 'medium'}
 
-<instructions>
-1. **THINK FIRST**: Output a <thinking> block. Analyze the requirements, architecture, dependencies, and risks. Plan the sequence of operations.
-2. **DESIGN THE CONTRACT**: For the Team Lead, you must define:
-   - **Strategy**: How should they approach this?
-   - **Subtasks**: If complex, break it down sequentially.
-   - **Roles**: Which specialists (from context) are best suited?
+---
 
-3. **DECIDE**:
-   - **EXECUTE**: If it's a single, cohesive unit of work.
-   - **SPLIT**: If it requires distinct phases (e.g., "Design -> Backend -> Frontend").
-   - **DEFER**: Only if resources are critical.
-</instructions>
+## Active Workload
 
-<output_format>
-Return strictly JSON (after your thinking block):
-{
-  "action": "execute" | "split" | "defer",
-  "reasoning": "Strategic justification...",
-  "complexity": "simple" | "moderate" | "complex" | "epic",
-  "interactionDepth": "one-shot" | "conversation",
-  "confidence": number,
-  "strategy_note": "High-level architectural guidance for the Team Lead",
-  "subtasks": [ // REQUIRED if action is "split"
-    {
-      "title": "Clear Actionable Title",
-      "objective": "What is the goal?",
-      "inputs": "What data/files are needed? (e.g., Output of Task 1)",
-      "guidelines": "Specific rules, constraints, or tech stack requirements",
-      "expectedOutput": "Exact definition of done (e.g., 'schema.sql file with indexes')",
-      "roles": ["List", "of", "relevant", "specialists"]
-    }
-  ]
-}
-</output_format>
+**Active tasks due on or before this deadline:** ${workloadLine}
+
+---
+
+## Company Context
+
+### Organization Overview
+${companyContext.organization ? companyContext.organization.substring(0, 1000) : 'Not available'}
+
+### Teams Structure
+${companyContext.teams ? companyContext.teams.substring(0, 1000) : 'Not available'}
+
+---
+
+## Previous Attempts (Same Team)
+
+${previousAttemptsBlock}
+
+---
+
+## Your Decision
+
+Analyze this task using the instructions from the system prompt above.
+When splitting tasks, calculate realistic schedules for each subtask based on the deadline.
+All subtasks must inherit project_id: ${project_id || 'null'} and team_id: ${team_id || 'null'}.
     `.trim();
 
     try {
@@ -105,7 +240,7 @@ Return strictly JSON (after your thinking block):
       }
 
       // Parse AI response
-      const analysis = this._parseAIResponse(result.output);
+      const analysis = await this._parseAIResponse(result.output, 'decision');
 
       if (analysis) {
         console.log(`[CTO] AI Decision: ${analysis.action} (confidence: ${analysis.confidence}%)`);
@@ -153,7 +288,11 @@ Return strictly JSON (after your thinking block):
       return { passed: false, missing: 'Ambiguous output, no AI available', score: 40 };
     }
 
-    console.log(`[CTO] Using ${modelSelection.model} for verification...`);
+    if (modelSelection.provider === 'gemini') {
+      console.log('[CTO] Using gemini for verification...');
+    } else {
+      console.log(`[CTO] Using ${modelSelection.model} for verification...`);
+    }
 
     const prompt = `You are a CTO verifying if a task was completed successfully.
 
@@ -183,7 +322,7 @@ Respond in JSON format:
       }, modelSelection.provider, modelSelection.model);
 
       if (verificationResult.success && verificationResult.output) {
-        const verification = this._parseAIResponse(verificationResult.output);
+        const verification = await this._parseAIResponse(verificationResult.output, 'verification');
 
         if (verification) {
           console.log(`[CTO] Verification: ${verification.passed ? 'PASSED' : 'FAILED'} (score: ${verification.score})`);
@@ -207,20 +346,127 @@ Respond in JSON format:
   }
 
   /**
-   * Parse AI JSON response
+   * Generic method to analyze content with a custom prompt
+   * Used for attachment distribution and other ad-hoc analyses
    */
-  _parseAIResponse(output) {
-    try {
-      // Try to extract JSON from output
-      const jsonMatch = output.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      return null;
-    } catch (error) {
-      console.error('[CTO] Failed to parse AI response:', error.message);
+  async analyzeWithPrompt(prompt, modelName = null, options = {}) {
+    const modelSelection = modelName
+      ? { model: modelName, provider: this._getProviderFromModel(modelName) }
+      : this.modelSelector.selectModel('simple');
+
+    if (!modelSelection.model) {
+      console.warn('[CTO] No AI model available for prompt analysis');
       return null;
     }
+
+    if (modelSelection.provider === 'gemini') {
+      console.log('[CTO] Using gemini for custom analysis...');
+    } else {
+      console.log(`[CTO] Using ${modelSelection.model} for custom analysis...`);
+    }
+
+    try {
+      const result = await this.agentExecutor.execute({
+        id: 'cto-analysis',
+        title: 'CTO Analysis',
+        description: prompt
+      }, modelSelection.provider, modelSelection.model);
+
+      if (result.success && result.output) {
+        const analysis = await this._parseAIResponse(result.output, options.schema || 'decision', options.systemPrompt);
+
+        // Track usage
+        this.modelSelector.resourceManager.trackCTOUsage(
+          modelSelection.provider,
+          result.messagesUsed || 1
+        );
+
+        return analysis;
+      }
+
+      return null;
+
+    } catch (error) {
+      console.error('[CTO] Analysis error:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Parse AI JSON response using GPT-4o-mini
+   */
+  async _parseAIResponse(output, schema = 'decision', systemPrompt = null) {
+    console.log('[CTO] Using GPT-4o-mini to extract JSON from AI output...');
+    const extractorPrompt = systemPrompt || this._getExtractorSystemPrompt(schema);
+    return await this._extractJsonWithGPT(output, extractorPrompt);
+  }
+
+  async _extractJsonWithGPT(messyOutput, systemPrompt) {
+    try {
+      const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY
+      });
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'system',
+          content: systemPrompt
+        }, {
+          role: 'user',
+          content: `Extract the JSON from this messy output:\n\n${messyOutput}`
+        }],
+        temperature: 0,
+        max_tokens: 16000
+      });
+
+      const extracted = response.choices[0].message.content.trim();
+      // Remove markdown code fences if GPT added them
+      const cleaned = extracted.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+      console.log('[CTO] GPT-4o-mini successfully extracted JSON');
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('[CTO] GPT-4o-mini extraction failed:', error.message);
+      return null;
+    }
+  }
+
+  _getExtractorSystemPrompt(schema) {
+    if (schema === 'verification') {
+      return [
+        'You are a strict JSON extractor.',
+        'Extract ONLY the single JSON object from the messy text.',
+        'Return ONLY raw JSON, no markdown, no commentary.',
+        'The JSON MUST include fields: passed, score, missing, strengths, concerns.',
+        'passed must be true or false.',
+        'score must be a number 0-100.',
+        'strengths and concerns must be arrays.',
+        'If multiple JSON objects exist, choose the one with the required fields.'
+      ].join(' ');
+    }
+    if (schema === 'attachments') {
+      return [
+        'You are a strict JSON extractor.',
+        'Extract ONLY the single JSON object from the messy text.',
+        'Return ONLY raw JSON, no markdown, no commentary.',
+        'The JSON MUST include fields: distribution and reasoning.',
+        'distribution must map attachment indices (as strings) to arrays of subtask indices (numbers).',
+        'reasoning must map attachment indices to short string explanations.',
+        'If multiple JSON objects exist, choose the one with the required fields.'
+      ].join(' ');
+    }
+    return [
+      'You are a strict JSON extractor.',
+      'Extract ONLY the single JSON object from the messy text.',
+      'Return ONLY raw JSON, no markdown, no commentary.',
+      'The JSON MUST include fields: action, reasoning, complexity, confidence, strategy_note, subtasks.',
+      'The action field MUST be exactly one of: split, execute, defer.',
+      'Preserve the action value verbatim from the source (do not reinterpret).',
+      'Preserve all subtask objects exactly as they appear in the source, including every field and value.',
+      'Do not summarize, reword, or drop any subtask fields.',
+      'If there are multiple JSON objects, choose the one that contains the required fields.'
+    ].join(' ');
   }
 
   _getProviderFromModel(modelName) {

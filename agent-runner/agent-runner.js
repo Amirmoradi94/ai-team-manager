@@ -1,3 +1,4 @@
+require('dotenv').config();
 const cron = require('node-cron');
 const express = require('express');
 const path = require('path');
@@ -31,9 +32,22 @@ class AgentRunner {
           this.taskAPI,
           activeConfig.cto,
           path.join(__dirname, 'team_lead'),
-          this.executor  // Pass executor so CTO can use AI models
+          this.executor,  // Pass executor so CTO can use AI models
+          null,
+          activeConfig
         )
       : null;
+  }
+
+  _parseLocalDateTime(dateStr, timeStr) {
+    try {
+      const [year, month, day] = dateStr.split('-').map(n => parseInt(n, 10));
+      const [hour, minute] = timeStr.split(':').map(n => parseInt(n, 10));
+      if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return NaN;
+      return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+    } catch {
+      return NaN;
+    }
   }
 
   setupSocketHandlers() {
@@ -57,6 +71,15 @@ class AgentRunner {
         if (error) console.error(`[Command] Failed to open terminal: ${error.message}`);
         else console.log(`[Command] Terminal opened for ${data.command}`);
       });
+    });
+
+    this.socket.on('cto:refresh-resources', async () => {
+      if (!this.cto) return;
+      console.log('[CTO] Forced resource refresh requested');
+      await this.cto.refreshResourceStatus(true, this.executor);
+      const resourceStatus = this.cto.getResourceStatus();
+      await this.taskAPI.sendHeartbeat(this.runnerToken, resourceStatus);
+      console.log('[CTO] Forced resource refresh complete');
     });
   }
 
@@ -102,12 +125,9 @@ class AgentRunner {
     console.log('[Debug] Starting heartbeat interval...');
     setInterval(() => this.checkIn(), 30000);
 
-    // 4. Start Resource Refresh (every 10m) - Sync with cmonitor/gcloud
+    // 4. Resource status refresh is triggered on CTO tab open only.
     if (this.cto) {
-      console.log('[CTO] Starting periodic resource refresh (10m)...');
-      setInterval(() => this.cto.refreshResourceStatus(), 10 * 60 * 1000);
-      
-      // Also sync settings from UI every 20s
+      // Still sync settings from UI every 20s
       setInterval(async () => {
         try {
           const settings = await this.taskAPI.getCTOSettings();
@@ -192,6 +212,14 @@ class AgentRunner {
         // Skip if already being processed or scheduled in this runner instance
         if (this.processedTaskIds.has(task.id)) continue;
 
+        // Respect scheduled date/time if set (local time)
+        if (task.scheduled_date && task.scheduled_time) {
+          const scheduledTs = this._parseLocalDateTime(task.scheduled_date, task.scheduled_time);
+          if (Number.isFinite(scheduledTs) && Date.now() < scheduledTs) {
+            continue;
+          }
+        }
+
         console.log(`\n[Runner] New task detected: ${task.title}`);
         
         // ... (rest of the directory switching logic)
@@ -216,6 +244,11 @@ class AgentRunner {
           const decision = await this.cto.evaluate(payload.task, payload);
           console.log(`[CTO] Decision: ${decision.action} | Reason: ${decision.reason}`);
 
+          // Normalize legacy action
+          if (decision.action === 'assign') {
+            decision.action = 'execute';
+          }
+
           // SCHEDULE: CEO manually set a time, or CTO deferred.
           if (decision.action === 'schedule') {
             const delay = decision.scheduledAt.getTime() - Date.now();
@@ -235,7 +268,7 @@ class AgentRunner {
           // SPLIT: Create subtasks, mark parent as epic, skip to next
           if (decision.action === 'split') {
             console.log(`[CTO] Splitting task "${task.title}" into subtasks...`);
-            await this.cto.splitTask(payload.task, payload);
+            await this.cto.splitTask(payload.task, payload, decision.aiAnalysis || null);
             await this.cto.persistState();
             continue;
           }
@@ -243,6 +276,8 @@ class AgentRunner {
           // DEFER: Skip this task for now
           if (decision.action === 'defer') {
             console.log(`[CTO] Deferring task "${task.title}": ${decision.reason}`);
+            // Prevent repeated polling for deferred tasks
+            this.processedTaskIds.add(task.id);
             await this.cto.persistState();
             continue;
           }
@@ -250,6 +285,13 @@ class AgentRunner {
           // SKIP: Ignore this task
           if (decision.action === 'skip') {
             console.log(`[CTO] Skipping task "${task.title}": ${decision.reason}`);
+            continue;
+          }
+
+          // Backlog tasks should never execute directly. Promote to todo first.
+          if ((payload.task.status || '').toLowerCase() === 'backlog' && decision.action === 'execute') {
+            console.log(`[CTO] Backlog task "${task.title}" requires CTO gate. Moving to todo for execution.`);
+            await this.taskAPI.changeTaskStatus(task.id, 'todo');
             continue;
           }
 
@@ -268,7 +310,8 @@ class AgentRunner {
             if (attempt === 0) {
               result = await this.executor.executeKanbanTask(
                 payload.task, payload.history, payload.identity, payload.specialists,
-                payload.project, payload.team, projectInfo.allSpecialists
+                payload.project, payload.team, projectInfo.allSpecialists,
+                { provider: decision.provider, model: decision.model }
               );
             } else {
               // Re-prompt with retry context
@@ -278,6 +321,7 @@ class AgentRunner {
               );
               result = await this.executor.executeTask(retryPrompt, {
                 provider: decision.provider,
+                model: decision.model,
                 mode: 'cli',
                 taskId: task.id,
                 workDir: payload.project.repository_path || process.cwd()
@@ -310,18 +354,20 @@ class AgentRunner {
 
               // Record strategic outcome for CTO memory (high-level only, no tech details)
               if (this.cto.taskHistory) {
-                await this.cto.taskHistory.recordOutcome({
-                  taskId: task.id,
-                  title: task.title,
-                  taskType: payload.task.task_type || 'task',
-                  provider: decision.provider,
-                  success: true,
-                  reason: `Completed successfully on attempt ${attempt + 1}. Verification score: ${verification.score}/100`,
-                  complexity: decision.complexity,
-                  attempts: attempt + 1,
-                  duration: result.duration
-                });
-              }
+                  await this.cto.taskHistory.recordOutcome({
+                    taskId: task.id,
+                    title: task.title,
+                    taskType: payload.task.task_type || 'task',
+                    provider: decision.provider,
+                    success: true,
+                    reason: `Completed successfully on attempt ${attempt + 1}. Verification score: ${verification.score}/100`,
+                    complexity: decision.complexity,
+                    attempts: attempt + 1,
+                    duration: result.duration,
+                    teamId: payload?.team?.id || null,
+                    teamName: payload?.team?.name || null
+                  });
+                }
 
               await this.taskAPI.markTaskForReviewWithMetadata(task.id, {
                 execution_time: result.duration,
@@ -332,6 +378,12 @@ class AgentRunner {
                 execution_completed_at: new Date().toISOString(),
                 completion_report: completionReport + `\n\n_CTO: Passed on attempt ${attempt + 1}/${maxAttempts} (score: ${verification.score})_`
               });
+              await this.taskAPI.addComment(
+                task.id,
+                `To CEO:\nTask executed and sent to review.\n- Provider: ${decision.provider}\n- Attempts: ${attempt + 1}/${maxAttempts}\n- Verification score: ${verification.score}\n\nSummary:\n${completionReport || 'No summary available.'}`,
+                true,
+                { id: 'cto-system', name: 'CTO' }
+              );
               console.log(`[CTO] Task ${task.id} completed on attempt ${attempt + 1}. Marked for review.`);
               break;
             }
@@ -350,18 +402,20 @@ class AgentRunner {
             // Record strategic outcome for CTO memory (high-level only)
             if (this.cto.taskHistory) {
               const verification = await this.cto.verifyCompletion(payload.task, lastResult);
-              await this.cto.taskHistory.recordOutcome({
-                taskId: task.id,
-                title: task.title,
-                taskType: payload.task.task_type || 'task',
-                provider: decision.provider,
-                success: false,
-                reason: `Failed after ${maxAttempts} attempts. Missing: ${verification.missing || 'Unknown'}`,
-                complexity: decision.complexity,
-                attempts: maxAttempts,
-                duration: lastResult?.duration
-              });
-            }
+                await this.cto.taskHistory.recordOutcome({
+                  taskId: task.id,
+                  title: task.title,
+                  taskType: payload.task.task_type || 'task',
+                  provider: decision.provider,
+                  success: false,
+                  reason: `Failed after ${maxAttempts} attempts. Missing: ${verification.missing || 'Unknown'}`,
+                  complexity: decision.complexity,
+                  attempts: maxAttempts,
+                  duration: lastResult?.duration,
+                  teamId: payload?.team?.id || null,
+                  teamName: payload?.team?.name || null
+                });
+              }
 
             await this.taskAPI.markTaskForReviewWithMetadata(task.id, {
               execution_time: lastResult?.duration,
@@ -371,6 +425,12 @@ class AgentRunner {
               execution_completed_at: new Date().toISOString(),
               completion_report: `**ESCALATED TO CEO** - Task failed after ${maxAttempts} attempts.\n\nLast output summary:\n${this.cto._summarizeOutput(lastOutput, 1000)}`
             });
+            await this.taskAPI.addComment(
+              task.id,
+              `To CEO:\nExecution failed and escalated for review.\n- Provider: ${decision.provider}\n- Attempts: ${maxAttempts}/${maxAttempts}\n\nLast output summary:\n${this.cto._summarizeOutput(lastOutput, 1000)}`,
+              true,
+              { id: 'cto-system', name: 'CTO' }
+            );
             console.log(`[CTO] Task ${task.id} escalated to CEO (for-review with failure report)`);
           }
 
@@ -406,6 +466,12 @@ class AgentRunner {
             execution_completed_at: new Date().toISOString(),
             completion_report: completionReport
           });
+          await this.taskAPI.addComment(
+            task.id,
+            `To CEO:\nTask completed and sent to review.\n- Provider: ${payload.identity?.model_config ? JSON.parse(payload.identity.model_config).provider : 'unknown'}\n\nSummary:\n${completionReport || 'No summary available.'}`,
+            true,
+            { id: 'cto-system', name: 'CTO' }
+          );
           console.log(`[Runner] Task ${task.id} marked for review with completion report`);
         } else {
           console.log(`[Runner] Task execution failed or incomplete`);

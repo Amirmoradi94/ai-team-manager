@@ -64,6 +64,39 @@ class ResourceManager {
     await this._checkCodexAuth();
   }
 
+  async checkExternalStatusWithExecutor(executor, prompt = 'hello') {
+    const providers = ['claude', 'gemini', 'codex'];
+    const now = Date.now();
+
+    const results = await Promise.all(providers.map(async (provider) => {
+      try {
+        const res = await executor.runProviderHealthCheck(provider, prompt);
+        return { provider, ...res };
+      } catch (e) {
+        return { provider, ok: false, error: e.message };
+      }
+    }));
+
+    for (const result of results) {
+      if (result.ok) {
+        this.externalState[`${result.provider}Auth`] = { needsAuth: false, updatedAt: now };
+        this.externalState[result.provider] = {
+          remaining5h: 100,
+          remainingDay: 100,
+          windowResetIn: 0,
+          updatedAt: now
+        };
+      } else {
+        this.externalState[`${result.provider}Auth`] = {
+          needsAuth: true,
+          reason: result.error || 'Health check failed',
+          updatedAt: now
+        };
+        this.externalState[result.provider] = { remaining5h: 0, remainingDay: 0, windowResetIn: 0, updatedAt: now };
+      }
+    }
+  }
+
   /**
    * Check Claude CLI authentication status
    */

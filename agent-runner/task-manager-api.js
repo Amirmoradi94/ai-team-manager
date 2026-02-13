@@ -763,7 +763,7 @@ class TaskManagerAPI {
   /**
    * Add a comment to a task
    */
-  async addComment(taskId, content, isSystem = false) {
+  async addComment(taskId, content, isSystem = false, userOverride = null) {
     if (!this.token) {
       throw new Error('Not authenticated. Call login() first.');
     }
@@ -779,7 +779,8 @@ class TaskManagerAPI {
         },
         body: JSON.stringify({
           content,
-          is_system: isSystem
+          is_system: isSystem,
+          user_override: userOverride
         }),
       });
 

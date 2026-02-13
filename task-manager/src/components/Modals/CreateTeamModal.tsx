@@ -23,7 +23,7 @@ export function CreateTeamModal({ isOpen, onClose, onSuccess, editingTeam }: Cre
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState<'mission' | 'identity' | null>(null);
   const [projects, setProjects] = useState<any[]>([]);
-  const [specialists, setSpecialists] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
 
   // Team Details
   const [teamName, setTeamName] = useState('');
@@ -34,8 +34,11 @@ export function CreateTeamModal({ isOpen, onClose, onSuccess, editingTeam }: Cre
   const [leadName, setLeadName] = useState('');
   const [leadPrompt, setLeadPrompt] = useState('');
 
-  // Specialists
-  const [selectedSpecialists, setSelectedSpecialists] = useState<string[]>([]);
+  // Employees
+  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
+  const [suggestedEmployees, setSuggestedEmployees] = useState<string[]>([]);
+  const [showAllEmployees, setShowAllEmployees] = useState(false);
+  const [isAnalyzingEmployees, setIsAnalyzingEmployees] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -52,11 +55,11 @@ export function CreateTeamModal({ isOpen, onClose, onSuccess, editingTeam }: Cre
           setLeadPrompt(editingTeam.lead.system_prompt || '');
         }
 
-        // Specialists
-        if (editingTeam.specialists) {
-          setSelectedSpecialists(editingTeam.specialists.map((s: any) => s.id));
+        // Employees
+        if (editingTeam.employees) {
+          setSelectedEmployees(editingTeam.employees.map((s: any) => s.id));
         } else {
-          setSelectedSpecialists([]);
+          setSelectedEmployees([]);
         }
       } else {
         setStep(1);
@@ -65,7 +68,7 @@ export function CreateTeamModal({ isOpen, onClose, onSuccess, editingTeam }: Cre
         setProjectId('');
         setLeadName('');
         setLeadPrompt('');
-        setSelectedSpecialists([]);
+        setSelectedEmployees([]);
       }
     }
   }, [isOpen, editingTeam]);
@@ -77,6 +80,46 @@ export function CreateTeamModal({ isOpen, onClose, onSuccess, editingTeam }: Cre
       setLeadPrompt(generatedPrompt);
     }
   }, [step, teamName, mission, leadName, editingTeam]);
+
+  // AI-powered employee suggestions when reaching step 3
+  useEffect(() => {
+    if (step === 3 && teamName && mission && !editingTeam && employees.length > 0) {
+      analyzeTeamNeeds();
+    }
+  }, [step, teamName, mission, employees, editingTeam]);
+
+  const analyzeTeamNeeds = async () => {
+    setIsAnalyzingEmployees(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/ai/suggest-team-employees`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          teamName,
+          mission
+        })
+      });
+
+      if (res.ok) {
+        const { employeeIds } = await res.json();
+        if (employeeIds && Array.isArray(employeeIds)) {
+          setSuggestedEmployees(employeeIds);
+          setSelectedEmployees(employeeIds); // Pre-select suggested employees
+          toast.success(`${employeeIds.length} employees recommended for this team`, {
+            icon: <Sparkles className="w-4 h-4 text-primary" />
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Employee suggestion failed:', error);
+    } finally {
+      setIsAnalyzingEmployees(false);
+    }
+  };
 
   const generateSystemPrompt = (team: string, missionText: string, lead: string) => {
     const missionPart = missionText
@@ -90,7 +133,7 @@ You are ${lead}, the Team Lead for ${team}. You are an expert orchestrator respo
 ## Your Responsibilities
 - **Strategic Planning**: Break down complex tasks into actionable steps
 - **Quality Assurance**: Review all work for correctness, completeness, and best practices
-- **Team Coordination**: Delegate tasks to specialists when needed and synthesize their contributions
+- **Team Coordination**: Delegate tasks to employees when needed and synthesize their contributions
 - **Decision Making**: Make informed technical and strategic decisions aligned with project goals
 - **Communication**: Provide clear status updates and escalate blockers when necessary
 
@@ -116,11 +159,11 @@ You are professional, thorough, and committed to excellence.`;
       const token = localStorage.getItem('token');
       const [projRes, specRes] = await Promise.all([
         fetch(`${API_URL}/projects`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${API_URL}/specialists`, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${API_URL}/employees`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
       
       if (projRes.ok) setProjects(await projRes.json());
-      if (specRes.ok) setSpecialists(await specRes.json());
+      if (specRes.ok) setEmployees(await specRes.json());
     } catch (e) {
       console.error(e);
     }
@@ -179,7 +222,7 @@ You are professional, thorough, and committed to excellence.`;
             name: leadName,
             system_prompt: leadPrompt
           },
-          specialist_ids: selectedSpecialists
+          specialist_ids: selectedEmployees
         })
       });
 
@@ -197,8 +240,8 @@ You are professional, thorough, and committed to excellence.`;
     }
   };
 
-  const handleToggleSpecialist = (id: string) => {
-    setSelectedSpecialists(prev => 
+  const handleToggleEmployee = (id: string) => {
+    setSelectedEmployees(prev => 
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
   };
@@ -320,7 +363,7 @@ You are professional, thorough, and committed to excellence.`;
                   <div className="flex justify-between pt-4">
                     <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
                     <Button onClick={() => setStep(3)} disabled={!leadName || !leadPrompt}>
-                      Next: Add Specialists
+                      Next: Add Employees
                     </Button>
                   </div>
                 </div>
@@ -328,31 +371,101 @@ You are professional, thorough, and committed to excellence.`;
 
               {step === 3 && (
                 <div className="space-y-5">
-                  <h3 className="text-lg font-medium">Team Composition</h3>
-                  <p className="text-sm text-muted-foreground">Select the specialists this team can call upon.</p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-1">
-                    {specialists.map(spec => (
-                      <div
-                        key={spec.id}
-                        className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                          selectedSpecialists.includes(spec.id)
-                            ? 'bg-primary/10 border-primary'
-                            : 'bg-secondary/50 border-border hover:border-primary/50'
-                        }`}
-                        onClick={() => handleToggleSpecialist(spec.id)}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <Checkbox checked={selectedSpecialists.includes(spec.id)} />
-                          <span className="font-medium text-sm">{spec.name}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2 pl-6">{spec.description}</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-medium flex items-center gap-2">
+                        Team Composition
+                        {suggestedEmployees.length > 0 && !showAllEmployees && (
+                          <span className="text-xs text-primary font-normal">({suggestedEmployees.length} recommended)</span>
+                        )}
+                      </h3>
+                      <p className="text-sm text-muted-foreground">Select the employees this team can call upon.</p>
+                    </div>
+                    {isAnalyzingEmployees && (
+                      <div className="flex items-center gap-2 text-xs text-primary animate-pulse">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        AI analyzing team needs...
                       </div>
-                    ))}
-                    {specialists.length === 0 && (
-                      <p className="text-muted-foreground text-sm col-span-2">No specialists defined yet. You can add them later.</p>
                     )}
                   </div>
+
+                  {suggestedEmployees.length > 0 && !showAllEmployees ? (
+                    // Show only suggested employees
+                    <div className="space-y-3">
+                      <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Sparkles className="w-4 h-4 text-primary" />
+                          <p className="text-xs text-muted-foreground">
+                            AI analyzed your team's mission and recommended these employees
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
+                          {employees.filter(e => suggestedEmployees.includes(e.id)).map(spec => (
+                            <div
+                              key={spec.id}
+                              className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                                selectedEmployees.includes(spec.id)
+                                  ? 'bg-primary/10 border-primary'
+                                  : 'bg-secondary/50 border-border hover:border-primary/50'
+                              }`}
+                              onClick={() => handleToggleEmployee(spec.id)}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <Checkbox checked={selectedEmployees.includes(spec.id)} />
+                                <span className="font-medium text-sm">{spec.name}</span>
+                              </div>
+                              <p className="text-xs text-muted-foreground line-clamp-2 pl-6">{spec.description}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowAllEmployees(true)}
+                        className="w-full text-xs"
+                      >
+                        Show all {employees.length} employees
+                      </Button>
+                    </div>
+                  ) : (
+                    // Show all employees
+                    <div className="space-y-3">
+                      {suggestedEmployees.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowAllEmployees(false)}
+                          className="w-full text-xs"
+                        >
+                          <Sparkles className="w-3 h-3 mr-2" />
+                          Show only recommended employees ({suggestedEmployees.length})
+                        </Button>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-1">
+                        {employees.map(spec => (
+                          <div
+                            key={spec.id}
+                            className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                              selectedEmployees.includes(spec.id)
+                                ? 'bg-primary/10 border-primary'
+                                : 'bg-secondary/50 border-border hover:border-primary/50'
+                            }`}
+                            onClick={() => handleToggleEmployee(spec.id)}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <Checkbox checked={selectedEmployees.includes(spec.id)} />
+                              <span className="font-medium text-sm">{spec.name}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground line-clamp-2 pl-6">{spec.description}</p>
+                          </div>
+                        ))}
+                        {employees.length === 0 && (
+                          <p className="text-muted-foreground text-sm col-span-2">No employees defined yet. You can add them later.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex justify-between pt-4">
                     <Button variant="outline" onClick={() => setStep(2)}>Back</Button>

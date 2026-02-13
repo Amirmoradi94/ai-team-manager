@@ -1,18 +1,11 @@
 const fs = require('fs').promises;
 const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
 const ResourceManager = require('./ResourceManager');
 const ProviderIntelligence = require('./ProviderIntelligence');
 const TaskHistoryManager = require('./TaskHistoryManager');
 const ModelSelector = require('./ModelSelector');
 const AIDecisionEngine = require('./AIDecisionEngine');
-
-// Complexity keywords for LOCAL scoring (zero AI cost)
-const COMPLEXITY_SIGNALS = {
-  simple:   ['rename', 'typo', 'update text', 'change color', 'add comment', 'minor', 'simple', 'tweak'],
-  moderate: ['implement', 'add feature', 'create component', 'build', 'integrate', 'connect'],
-  complex:  ['refactor', 'migrate', 'redesign', 'overhaul', 'architecture', 'security audit'],
-  epic:     ['full system', 'complete rewrite', 'multi-service', 'end-to-end', 'entire', 'all modules']
-};
 
 const MESSAGE_ESTIMATES = { simple: 5, moderate: 12, complex: 25, epic: 50 };
 
@@ -36,16 +29,21 @@ const STRATEGIES = {
 };
 
 class CTOEngine {
-  constructor(taskAPI, ctoConfig, teamLeadDir, agentExecutor = null) {
+  constructor(taskAPI, ctoConfig, teamLeadDir, agentExecutor = null, dbPath = null, runnerConfig = null) {
     this.taskAPI = taskAPI;
     this.teamLeadDir = teamLeadDir; // Team lead directory (for context only, CTO doesn't use it)
     this.config = ctoConfig || {};
+    this.runnerSchedule = runnerConfig?.schedule?.specificTasks || [];
     this.agentExecutor = agentExecutor;
+    this.dbPath = dbPath || path.join(__dirname, '..', '..', 'task-manager', 'server', 'taskmanager.db');
+
+    // CTO Enabled Flag
+    this.enabled = ctoConfig?.enabled !== false; // Default to true
 
     // CEO Controls
     this.strategy = ctoConfig?.strategy || 'balanced';
     this.autonomyLevel = ctoConfig?.autonomyLevel || 'full'; // 'full', 'oversight'
-    
+
     // Apply strategy settings
     const strat = STRATEGIES[this.strategy] || STRATEGIES.balanced;
     this.maxRetries = strat.maxRetries;
@@ -65,6 +63,8 @@ class CTOEngine {
     this.providerIntelligence = new ProviderIntelligence(this.resourceManager);
     this.taskHistory = new TaskHistoryManager(ctoStateDir);
     this.modelSelector = new ModelSelector(this.resourceManager, ctoConfig?.models);
+    this.executor = agentExecutor;
+    this.lastTaskResourceCheckAt = 0;
 
     // AI-powered decision engine (uses Gemini Pro, Claude Opus, or GPT-5.2)
     if (agentExecutor) {
@@ -75,10 +75,41 @@ class CTOEngine {
     this.decisionLogFile = path.join(ctoDecisionsDir, 'DECISION_LOG.md');
   }
 
+  /**
+   * Load employees from database
+   */
+  async getEmployees() {
+    return new Promise((resolve, reject) => {
+      const db = new sqlite3.Database(this.dbPath, (err) => {
+        if (err) {
+          console.error('[CTO] Failed to connect to database:', err.message);
+          resolve([]);
+          return;
+        }
+
+        db.all('SELECT id, name, description, tools FROM specialists ORDER BY name', [], (err, rows) => {
+          db.close();
+
+          if (err) {
+            console.error('[CTO] Failed to query employees:', err.message);
+            resolve([]);
+            return;
+          }
+
+          resolve(rows || []);
+        });
+      });
+    });
+  }
+
   updateSettings(settings) {
     if (!settings) return;
+
+    // Update enabled status
+    if (settings.enabled !== undefined) this.enabled = settings.enabled;
+
     if (settings.ctoProvider) this.ctoProvider = settings.ctoProvider;
-    
+
     // Handle CEO Controls
     if (settings.strategy && STRATEGIES[settings.strategy]) {
       this.strategy = settings.strategy;
@@ -134,7 +165,8 @@ class CTOEngine {
     // Show available AI models for CTO decision-making
     const availableModels = this.modelSelector.getAvailableModels();
     if (availableModels.length > 0) {
-      console.log(`[CTO] AI Decision Models available: ${availableModels.map(m => m.model).join(', ')}`);
+      const modelNames = availableModels.map(m => (m.provider === 'gemini' ? 'gemini' : m.model));
+      console.log(`[CTO] AI Decision Models available: ${modelNames.join(', ')}`);
     } else {
       console.log('[CTO] WARNING: No AI models available for decision-making!');
     }
@@ -143,8 +175,12 @@ class CTOEngine {
   /**
    * Refresh resource status from external monitors (cmonitor, gcloud)
    */
-  async refreshResourceStatus() {
-    await this.resourceManager.checkExternalStatus();
+  async refreshResourceStatus(forceCheck = false, executor = null) {
+    if (forceCheck && executor) {
+      await this.resourceManager.checkExternalStatusWithExecutor(executor, 'hello');
+    } else {
+      await this.resourceManager.checkExternalStatus();
+    }
     await this.resourceManager.persistState();
   }
 
@@ -158,6 +194,16 @@ class CTOEngine {
    * 3. SCHEDULES (defers to a better time)
    */
   async evaluate(task, payload) {
+    // Task-level resource check (independent of CTO dashboard refresh)
+    try {
+      const now = Date.now();
+      if (this.executor && (!this.lastTaskResourceCheckAt || now - this.lastTaskResourceCheckAt > 2 * 60 * 1000)) {
+        await this.resourceManager.checkExternalStatusWithExecutor(this.executor, 'hello');
+        this.lastTaskResourceCheckAt = now;
+      }
+    } catch (e) {
+      console.warn('[CTO] Task resource check failed:', e.message);
+    }
     const { title, description, scheduled_date, scheduled_time, priority } = task;
     const identity = payload?.identity || {};
 
@@ -179,6 +225,11 @@ class CTOEngine {
     // 2. Determine Effective Deadline (Infer from priority if not set)
     const deadline = task.due_date ? new Date(task.due_date) : this._inferDeadline(priority);
     const resourceStatus = this.resourceManager.getStatus();
+    const activeTasksUntilDeadline = await this._countActiveTasksUntil(deadline, task.id);
+
+    // 3. Load available employees from database
+    const employees = await this.getEmployees();
+    console.log(`[CTO] Loaded ${employees.length} employees for context`);
 
     // AI-powered analysis (Always used)
     if (this.aiEngine) {
@@ -186,8 +237,11 @@ class CTOEngine {
         availableProviders: ['claude', 'gemini', 'codex'],
         resourceStatus: resourceStatus, // This contains the 'cmonitor' ground truth
         historicalData: this.taskHistory.getInsights(),
-        deadline: deadline.toISOString(),
-        priority: priority || 'medium'
+        deadline: deadline,
+        activeTasksUntilDeadline: activeTasksUntilDeadline,
+        priority: priority || 'medium',
+        employees: employees, // Pass employees to AI for decision-making
+        team: payload?.team || null
       };
 
       const aiAnalysis = await this.aiEngine.analyzeTask(task, context);
@@ -203,7 +257,8 @@ class CTOEngine {
             reason: aiAnalysis.reasoning,
             confidence: aiAnalysis.confidence,
             complexity: { level: aiAnalysis.complexity, score: this._complexityToScore(aiAnalysis.complexity) },
-            aiPowered: true
+            aiPowered: true,
+            aiAnalysis: aiAnalysis
           };
           await this._logDecision(task, decision);
           return decision;
@@ -239,34 +294,59 @@ class CTOEngine {
       }
     }
 
-    // Fallback: Rule-based analysis
-    const complexity = this._analyzeComplexity(title, description);
-    
-    // Fallback Split Logic
-    if (complexity.level === 'epic' || (complexity.score >= this.splitThreshold && this._hasNumberedSteps(description))) {
-      const decision = {
-        action: 'split',
-        reason: `Rule-based: Complexity ${complexity.level} (score: ${complexity.score}) requires splitting.`,
-        confidence: complexity.score,
-        complexity
-      };
-      await this._logDecision(task, decision);
-      return decision;
+    // No AI available - do not execute. Keep in backlog with warning.
+    console.warn('[CTO] AI analysis not available. Deferring execution and flagging task.');
+    const warningMsg = 'CTO paused: No AI model available for decision-making. Task requires AI to split/analyze.';
+
+    try {
+      const resourceMetadata = JSON.stringify({
+        cto_warning: warningMsg,
+        cto_warning_at: new Date().toISOString()
+      });
+      await this.taskAPI.updateTask(task.id, {
+        status: 'backlog',
+        resource_metadata: resourceMetadata
+      });
+      await this.taskAPI.addComment(
+        task.id,
+        `To CEO:\n${warningMsg}`,
+        true,
+        { id: 'cto-system', name: 'CTO' }
+      );
+    } catch (e) {
+      console.warn('[CTO] Failed to flag task with AI-unavailable warning:', e.message);
     }
 
-    // Fallback Assign Logic
     const decision = {
-      action: 'assign',
-      assignee_id: payload.team?.lead?.id,
-      provider: 'claude', // Default fallback
-      model: 'claude-sonnet-4.5',
-      reason: 'Rule-based fallback: Assigned to Team Lead.',
-      confidence: Math.max(60, 100 - complexity.score),
-      estimatedMessages: 12,
-      complexity
+      action: 'defer',
+      reason: warningMsg,
+      confidence: 0,
+      estimatedMessages: 0,
+      complexity: { level: 'unknown', score: 0 },
+      aiPowered: false
     };
     await this._logDecision(task, decision);
     return decision;
+  }
+
+  async _countActiveTasksUntil(deadlineDate, excludeTaskId = null) {
+    if (!deadlineDate) return null;
+    try {
+      const tasks = await this.taskAPI.getAllTasks();
+      const cutoff = new Date(deadlineDate).getTime();
+      const excludedStatuses = new Set(['done', 'completed', 'cancelled', 'archived']);
+      const active = tasks.filter(t => {
+        if (excludeTaskId && t.id === excludeTaskId) return false;
+        if (excludedStatuses.has((t.status || '').toLowerCase())) return false;
+        if (!t.due_date) return false;
+        const due = new Date(t.due_date).getTime();
+        return Number.isFinite(due) && due <= cutoff;
+      });
+      return active.length;
+    } catch (error) {
+      console.warn('[CTO] Failed to count active tasks until deadline:', error.message);
+      return null;
+    }
   }
 
   // ========== SPLIT LOGIC ==========
@@ -275,13 +355,24 @@ class CTOEngine {
    * Split an epic task into subtasks.
    * Sets parent to 'epic' + 'in-progress', creates children as 'todo' subtasks assigned to Team Lead.
    * Schedules them SEQUENTIALLY to avoid resource contention and enforce dependency.
+   * Calculates smart deadlines for each subtask based on overall deadline.
    */
-  async splitTask(task, payload) {
-    const aiAnalysis = await this.decisionEngine.analyzeTask(task, { 
-      ...this._getProjectState(payload), 
-      specialists: payload.specialists 
-    });
-    
+  async splitTask(task, payload, existingAnalysis = null) {
+    // Load employees for AI context
+    const employees = await this.getEmployees();
+
+    const context = {
+      employees: employees,
+      availableProviders: ['claude', 'gemini', 'codex'],
+      resourceStatus: this.resourceManager.getStatus(),
+      historicalData: this.taskHistory.getInsights(),
+      deadline: task.due_date ? new Date(task.due_date) : null,
+      priority: task.priority || 'medium',
+      team: payload?.team || null
+    };
+
+    const aiAnalysis = existingAnalysis || await this.aiEngine.analyzeTask(task, context);
+
     // Fallback if AI fails
     if (!aiAnalysis || !aiAnalysis.subtasks || aiAnalysis.subtasks.length === 0) {
       return this._fallbackSplitTask(task, payload);
@@ -289,22 +380,20 @@ class CTOEngine {
 
     const subtasksData = aiAnalysis.subtasks;
     const teamLeadId = payload?.team?.lead?.id;
+    const teamName = payload?.team?.name || null;
+    const projectName = payload?.project?.name || null;
 
-    // Mark parent as epic in-progress
-    await this.taskAPI.updateTask(task.id, {
-      task_type: 'epic',
-      status: 'in-progress',
-      resource_metadata: JSON.stringify({
-        split_reason: aiAnalysis.reasoning,
-        strategy: aiAnalysis.strategy_note,
-        split_at: new Date().toISOString(),
-        subtask_count: subtasksData.length
-      }),
-      description: `**CTO Strategy:** ${aiAnalysis.strategy_note}\n\n${task.description}`
-    });
+    // Calculate deadline distribution
+    const deadlineDate = task.due_date ? new Date(task.due_date) : null;
+    const overallDeadline = deadlineDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const totalTimeAvailable = overallDeadline - now; // milliseconds
+    const subtaskCount = subtasksData.length;
+    const blockedIntervals = await this._getBlockedIntervals(overallDeadline, task.id);
 
     // Create subtasks assigned to Team Lead
     const subtasks = [];
+    let failedCreates = 0;
     let accumulatedDelayMinutes = 0;
     
     // Check resource pressure
@@ -325,35 +414,117 @@ class CTOEngine {
 
     for (let i = 0; i < subtasksData.length; i++) {
       const sub = subtasksData[i];
-      
+
       // Dynamic duration based on task complexity
       const estimatedDuration = sub.complexity === 'complex' ? 45 : sub.complexity === 'moderate' ? 25 : 15;
 
-      // Calculate schedule time
-      const scheduleTime = new Date(Date.now() + (accumulatedDelayMinutes * 60 * 1000));
-      const dateStr = scheduleTime.toISOString().split('T')[0];
-      const timeStr = scheduleTime.toTimeString().substring(0, 5);
+      // Calculate schedule time for start
+      let scheduleTime = new Date(Date.now() + (accumulatedDelayMinutes * 60 * 1000));
+      scheduleTime = this._findNextAvailableSlot(scheduleTime, blockedIntervals, 30);
+      const dateStr = this._formatLocalDate(scheduleTime);
+      const timeStr = this._formatLocalTime(scheduleTime);
 
-      // Build Rich Markdown Contract with Directory Mandate
-      const contract = `
+      // Calculate deadline for this subtask
+      // Distribute time evenly, leaving 20% buffer for final review
+      const timePerSubtask = (totalTimeAvailable * 0.8) / subtaskCount;
+      const subtaskDeadline = new Date(now.getTime() + timePerSubtask * (i + 1));
+      const deadlineStr = subtaskDeadline.toISOString().split('T')[0];
+
+      // Build paths for context files (only relevant ones)
+      const companyDir = path.join(require('os').homedir(), 'mycompany');
+      const projectSlug = projectName ? projectName.toLowerCase().replace(/[^a-z0-9]+/g, '_') : null;
+      const teamSlug = teamName ? teamName.toLowerCase().replace(/[^a-z0-9]+/g, '_') : null;
+
+      // Get team members (employees assigned to this team)
+      const teamMembers = (payload?.team?.specialists && payload.team.specialists.length > 0)
+        ? payload.team.specialists
+        : (payload?.specialists || []);
+      const teamMembersList = teamMembers.length > 0
+        ? teamMembers.map(emp => `- **${emp.name}**: ${emp.description || 'No description'}`).join('\n')
+        : '_No specific employees assigned to this team_';
+
+      // Build Focused Markdown Contract (This is the ONLY prompt the Team Lead sees)
+      const contract = `# ${sub.title}
+
 ## 🎯 Objective
-${sub.objective}
+
+${sub.objective || 'Complete this subtask as part of the larger epic.'}
+
+## 🔗 Context
+
+This is **Subtask ${i + 1} of ${subtasksData.length}** in the epic: "${task.title}"
+
+${task.description ? `**Parent Task Description:**\n${task.description.substring(0, 500)}${task.description.length > 500 ? '...' : ''}` : ''}
 
 ## 📂 Output Directory
+
 \`${taskDir}\` (Create if not exists)
-*All artifacts must be saved here.*
 
-## 📥 Inputs
-${sub.inputs}
+**CRITICAL**: All artifacts (code, configs, docs) must be saved in this directory.
 
-## 📝 Guidelines
-${sub.guidelines}
+## 📚 Relevant Context
 
-## 📤 Expected Output
-${sub.expectedOutput}
+${projectSlug ? `**Project Overview**: Read \`${companyDir}/projects/${projectSlug}/OVERVIEW.md\` for project goals and requirements.\n` : ''}
 
-## 👥 Available Roles
-${sub.roles && sub.roles.length > 0 ? sub.roles.map(r => `- ${r}`).join('\n') : '_Team Lead Execution_'}
+${teamSlug ? `**Your Team**: Read \`${companyDir}/teams/${teamSlug}/OVERVIEW.md\` for team mission and working guidelines.\n` : ''}
+
+${i > 0 ? `**Previous Subtask**: Check outputs in \`${taskDir}\` from "${subtasksData[i-1].title}" for dependencies.\n` : ''}
+
+${payload?.project?.repository_path ? `**Codebase**: \`${payload.project.repository_path}\` - Review existing patterns before implementing.\n` : ''}
+
+${task.failed_at ? `**⚠️ Previous Attempt**: This task was attempted before. Check task comments/logs for what went wrong and avoid the same issues.\n` : ''}
+
+**Action**: Read the relevant context files above using the \`Read\` tool before implementing.
+
+## 👥 Team Members Available
+
+${teamMembersList}
+
+**Note**: You can call upon any of these team members for specialized tasks.
+
+## 📥 Inputs Required
+
+${sub.inputs || 'Use outputs from previous subtasks if applicable.'}
+
+${i > 0 ? `**Previous Subtask Output**: Check \`${taskDir}\` for outputs from "${subtasksData[i-1].title}"` : ''}
+
+## 📝 Implementation Guidelines
+
+${sub.guidelines || 'Follow project coding standards and best practices.'}
+
+**Additional Requirements:**
+- Write clean, well-documented code
+- Include error handling and validation
+- Add inline comments for complex logic
+- Follow naming conventions
+- Ensure backward compatibility if modifying existing code
+
+## 📤 Expected Output (Definition of Done)
+
+${sub.expectedOutput || 'Complete implementation with working code.'}
+
+**Acceptance Criteria:**
+- All specified features implemented and working
+- Code follows project standards
+- No breaking changes to existing functionality
+- Output files saved in correct directory
+
+## ⏰ Timeline
+
+- **Start Time**: ${scheduleTime.toISOString()}
+- **Deadline**: ${subtaskDeadline.toISOString()}
+- **Estimated Duration**: ${estimatedDuration} minutes
+
+${deadlineDate ? `**⚠️ Parent Deadline**: ${deadlineDate.toISOString()} - Stay on schedule!\n` : ''}
+
+## 🔄 Next Steps
+
+${i < subtasksData.length - 1 ? `After completion, next subtask: "${subtasksData[i+1].title}"` : 'Final subtask - all epic components will be ready for integration after this.'}
+
+---
+
+*Generated by CTO Intelligence Layer*
+*Epic: ${task.title} | Subtask ${i + 1}/${subtasksData.length} | Complexity: ${sub.complexity || 'moderate'}*
       `.trim();
 
       const subtaskData = {
@@ -362,12 +533,13 @@ ${sub.roles && sub.roles.length > 0 ? sub.roles.map(r => `- ${r}`).join('\n') : 
         status: 'todo',
         priority: task.priority || 'medium',
         parent_id: task.id,
-        task_type: 'subtask',
-        project_id: payload?.project?.id,
-        team_id: payload?.team?.id,
+        task_type: 'task',
+        project_id: task.project_id, // Inherit from parent
+        team_id: task.team_id, // Inherit from parent
         assignee_id: teamLeadId, // EXPLICITLY assign to Team Lead
         scheduled_date: dateStr,
-        scheduled_time: timeStr
+        scheduled_time: timeStr,
+        due_date: deadlineStr // Set calculated deadline
       };
 
       try {
@@ -377,19 +549,357 @@ ${sub.roles && sub.roles.length > 0 ? sub.roles.map(r => `- ${r}`).join('\n') : 
         accumulatedDelayMinutes += (estimatedDuration + BASE_BUFFER);
       } catch (e) {
         console.error(`[CTO] Failed to create subtask ${i + 1}:`, e.message);
+        failedCreates += 1;
       }
     }
 
-    console.log(`[CTO] Split "${task.title}" into ${subtasks.length} subtasks. Total estimated schedule span: ${accumulatedDelayMinutes}m`);
+    console.log(`[CTO] ✅ Split "${task.title}" into ${subtasks.length} subtasks`);
+    console.log(`[CTO] Schedule span: ${accumulatedDelayMinutes}m | Team: ${teamName || 'N/A'} | Project: ${projectName || 'N/A'}`);
+
     await this.taskHistory.recordEpicSplit(task, subtasks.length);
+
+    // Log subtask creation summary
+    subtasks.forEach((st, idx) => {
+      console.log(`  ${idx + 1}. ${st.title} → Scheduled: ${st.scheduled_date} ${st.scheduled_time}`);
+    });
+
+    console.log(`[CTO] All subtasks created with focused context (team members, project overview, previous outputs only)`);
+
+    // Distribute attachments intelligently across subtasks
+    if (task.attachments) {
+      try {
+        await this.distributeAttachments(task, subtasks, subtasksData);
+      } catch (error) {
+        console.error('[CTO] Failed to distribute attachments:', error);
+      }
+    }
+
+    if (subtasks.length > 0 && failedCreates === 0) {
+      try {
+        await this.taskAPI.deleteTask(task.id);
+        console.log(`[CTO] Deleted parent task "${task.title}" after splitting`);
+      } catch (error) {
+        console.error('[CTO] Failed to delete parent task after splitting:', error.message);
+      }
+    }
+
     return subtasks;
   }
 
   async _fallbackSplitTask(task, payload) {
-    // ... existing regex logic ...
+    console.warn('[CTO] Using fallback split logic (AI analysis failed)');
+
     const steps = this._extractSteps(task.description);
-    // (Rest of old splitTask logic reused here as fallback)
-    return []; // Placeholder for brevity, real implementation should mimic old splitTask
+
+    if (steps.length === 0) {
+      console.error('[CTO] No steps found for splitting. Cannot split task.');
+      return [];
+    }
+
+    const teamLeadId = payload?.team?.lead?.id;
+    const subtasks = [];
+    let failedCreates = 0;
+
+    const blockedIntervals = await this._getBlockedIntervals(null, task.id);
+
+    // Create subtasks from extracted steps
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      let scheduleTime = new Date(Date.now() + (i * 30 * 60 * 1000)); // 30 min apart
+      scheduleTime = this._findNextAvailableSlot(scheduleTime, blockedIntervals, 30);
+      const dateStr = this._formatLocalDate(scheduleTime);
+      const timeStr = this._formatLocalTime(scheduleTime);
+
+      const subtaskData = {
+        title: `Step ${i + 1}: ${step.substring(0, 50)}`,
+        description: step,
+        status: 'todo',
+        priority: task.priority || 'medium',
+        parent_id: task.id,
+        task_type: 'task',
+        project_id: task.project_id, // Inherit from parent
+        team_id: task.team_id, // Inherit from parent
+        assignee_id: teamLeadId,
+        scheduled_date: dateStr,
+        scheduled_time: timeStr
+      };
+
+      try {
+        const created = await this.taskAPI.createTask(subtaskData);
+        subtasks.push(created);
+      } catch (e) {
+        console.error(`[CTO] Failed to create subtask ${i + 1}:`, e.message);
+        failedCreates += 1;
+      }
+    }
+
+    console.log(`[CTO] Fallback split created ${subtasks.length} subtasks`);
+
+    if (subtasks.length > 0 && failedCreates === 0) {
+      try {
+        await this.taskAPI.deleteTask(task.id);
+        console.log(`[CTO] Deleted parent task "${task.title}" after fallback splitting`);
+      } catch (error) {
+        console.error('[CTO] Failed to delete parent task after fallback splitting:', error.message);
+      }
+    }
+    return subtasks;
+  }
+
+  /**
+   * Intelligently distribute attachments from parent task to subtasks.
+   * Uses AI to analyze each attachment and determine which subtask(s) it's relevant for.
+   *
+   * @param {Object} parentTask - The parent task with attachments
+   * @param {Array} subtasks - The created subtasks
+   * @param {Array} subtasksData - The subtask data with objectives
+   * @returns {Promise<Object>} - Mapping of subtask IDs to their attachments
+   */
+  async distributeAttachments(parentTask, subtasks, subtasksData) {
+    // Parse parent task attachments
+    const parentAttachments = parentTask.attachments
+      ? (typeof parentTask.attachments === 'string'
+          ? JSON.parse(parentTask.attachments)
+          : parentTask.attachments)
+      : [];
+
+    if (!parentAttachments || parentAttachments.length === 0) {
+      console.log('[CTO] No attachments to distribute');
+      return {};
+    }
+
+    console.log(`[CTO] Analyzing ${parentAttachments.length} attachments for distribution across ${subtasks.length} subtasks`);
+
+    // Build context for AI analysis
+    const subtaskSummaries = subtasksData.map((sub, idx) => ({
+      index: idx + 1,
+      title: sub.title,
+      objective: sub.objective,
+      expectedOutput: sub.expectedOutput
+    }));
+
+    const attachmentSummaries = parentAttachments.map((att, idx) => ({
+      index: idx + 1,
+      filename: att.filename || att.name || `attachment-${idx + 1}`,
+      type: att.type || att.mimeType || 'unknown',
+      size: att.size || 0,
+      description: att.description || ''
+    }));
+
+    // Use AI to analyze and distribute
+    const prompt = `You are a CTO analyzing task attachments to distribute them to the correct subtasks.
+
+## Parent Task
+**Title**: ${parentTask.title}
+**Description**: ${parentTask.description ? parentTask.description.substring(0, 500) : 'N/A'}
+
+## Subtasks
+${subtaskSummaries.map(st => `**Subtask ${st.index}**: ${st.title}
+   Objective: ${st.objective}
+   Expected Output: ${st.expectedOutput}`).join('\n\n')}
+
+## Attachments
+${attachmentSummaries.map(att => `**Attachment ${att.index}**: ${att.filename}
+   Type: ${att.type}
+   Size: ${att.size} bytes
+   Description: ${att.description || 'No description'}`).join('\n\n')}
+
+## Your Task
+Analyze each attachment and determine which subtask(s) it's relevant for based on:
+1. Filename and file type
+2. The subtask objectives and expected outputs
+3. Logical workflow dependencies
+
+Return a JSON object mapping attachment indices to subtask indices:
+{
+  "distribution": {
+    "1": [1, 2],  // Attachment 1 is relevant for subtasks 1 and 2
+    "2": [3],     // Attachment 2 is only for subtask 3
+    "3": [1, 2, 3, 4]  // Attachment 3 is needed by all subtasks
+  },
+  "reasoning": {
+    "1": "API spec document needed for backend setup and endpoint implementation",
+    "2": "Design mockup only relevant for frontend work",
+    "3": "Configuration file needed by all components"
+  }
+}
+
+If an attachment doesn't clearly belong to any subtask, include it in subtask 1 by default.`;
+
+    try {
+      const analysis = await this.aiEngine.analyzeWithPrompt(prompt, null, { schema: 'attachments' });
+
+      if (!analysis || !analysis.distribution) {
+        console.warn('[CTO] AI attachment analysis failed, using fallback distribution');
+        return this._fallbackDistributeAttachments(parentAttachments, subtasks);
+      }
+
+      // Build attachment mapping for each subtask
+      const subtaskAttachments = {};
+
+      for (const [attIndex, subtaskIndices] of Object.entries(analysis.distribution)) {
+        const attachment = parentAttachments[parseInt(attIndex) - 1];
+
+        for (const subtaskIdx of subtaskIndices) {
+          const subtask = subtasks[subtaskIdx - 1];
+          if (!subtask) continue;
+
+          if (!subtaskAttachments[subtask.id]) {
+            subtaskAttachments[subtask.id] = [];
+          }
+
+          subtaskAttachments[subtask.id].push({
+            ...attachment,
+            relevance_reason: analysis.reasoning[attIndex]
+          });
+        }
+      }
+
+      // Update each subtask with its attachments
+      for (const [subtaskId, attachments] of Object.entries(subtaskAttachments)) {
+        await this.taskAPI.updateTask(subtaskId, {
+          attachments: JSON.stringify(attachments)
+        });
+
+        console.log(`[CTO] ✅ Assigned ${attachments.length} attachment(s) to subtask ${subtaskId}`);
+        attachments.forEach(att => {
+          console.log(`   - ${att.filename}: ${att.relevance_reason}`);
+        });
+      }
+
+      return subtaskAttachments;
+
+    } catch (error) {
+      console.error('[CTO] Error distributing attachments:', error);
+      return this._fallbackDistributeAttachments(parentAttachments, subtasks);
+    }
+  }
+
+  /**
+   * Fallback: Distribute all attachments to all subtasks if AI analysis fails
+   */
+  _fallbackDistributeAttachments(attachments, subtasks) {
+    if (subtasks.length === 0) return {};
+
+    const result = {};
+    for (const subtask of subtasks) {
+      result[subtask.id] = attachments;
+      this.taskAPI.updateTask(subtask.id, {
+        attachments: JSON.stringify(attachments)
+      }).catch(err => console.error('[CTO] Failed to update subtask attachments:', err));
+    }
+
+    console.log(`[CTO] ⚠️ Fallback: Assigned all ${attachments.length} attachments to all ${subtasks.length} subtasks`);
+    return result;
+  }
+
+  _findNextAvailableSlot(startTime, blockedIntervals, stepMinutes = 30) {
+    if (!blockedIntervals || blockedIntervals.length === 0) return startTime;
+    const stepMs = stepMinutes * 60 * 1000;
+    let candidate = new Date(startTime.getTime());
+    const maxIterations = 2000;
+    let iterations = 0;
+
+    while (iterations < maxIterations) {
+      const conflict = blockedIntervals.some(([start, end]) => {
+        const t = candidate.getTime();
+        return t >= start && t < end;
+      });
+      if (!conflict) return candidate;
+      candidate = new Date(candidate.getTime() + stepMs);
+      iterations += 1;
+    }
+
+    return candidate;
+  }
+
+  async _getBlockedIntervals(deadlineDate = null, excludeTaskId = null) {
+    const blocked = [];
+    const oneHourMs = 60 * 60 * 1000;
+    const now = Date.now();
+
+    try {
+      const tasks = await this.taskAPI.getAllTasks();
+      for (const task of tasks) {
+        if (excludeTaskId && task.id === excludeTaskId) continue;
+        const status = (task.status || '').toLowerCase();
+        if (status === 'in-progress') {
+          const start = task.execution_started_at ? new Date(task.execution_started_at).getTime() : now;
+          blocked.push([start, start + oneHourMs]);
+          continue;
+        }
+
+        if (task.scheduled_date && task.scheduled_time) {
+          const scheduled = this._parseLocalDateTime(task.scheduled_date, task.scheduled_time);
+          if (Number.isFinite(scheduled)) {
+            blocked.push([scheduled, scheduled + oneHourMs]);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[CTO] Failed to load tasks for scheduling conflicts:', error.message);
+    }
+
+    if (this.runnerSchedule && this.runnerSchedule.length > 0 && deadlineDate) {
+      const deadlineTs = new Date(deadlineDate).getTime();
+      for (const job of this.runnerSchedule) {
+        const nextRun = this._getNextCronRun(job.cron, now, deadlineTs);
+        if (nextRun) {
+          blocked.push([nextRun, nextRun + oneHourMs]);
+        }
+      }
+    }
+
+    return blocked;
+  }
+
+  _parseLocalDateTime(dateStr, timeStr) {
+    try {
+      const [year, month, day] = dateStr.split('-').map(n => parseInt(n, 10));
+      const [hour, minute] = timeStr.split(':').map(n => parseInt(n, 10));
+      if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return NaN;
+      return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+    } catch {
+      return NaN;
+    }
+  }
+
+  _getNextCronRun(cronExpr, fromTs, deadlineTs) {
+    // Supports simple 5-field cron: "m h * * *" or "m h * * d"
+    const parts = (cronExpr || '').trim().split(/\s+/);
+    if (parts.length < 5) return null;
+    const [minStr, hourStr, , , dowStr] = parts;
+    const minute = parseInt(minStr, 10);
+    const hour = parseInt(hourStr, 10);
+    if (Number.isNaN(minute) || Number.isNaN(hour)) return null;
+
+    const now = new Date(fromTs);
+    for (let i = 0; i < 30; i++) {
+      const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, hour, minute, 0, 0);
+      if (candidate.getTime() < fromTs) continue;
+      if (deadlineTs && candidate.getTime() > deadlineTs) return null;
+      if (dowStr === '*' || typeof dowStr === 'undefined') {
+        return candidate.getTime();
+      }
+      const dow = parseInt(dowStr, 10);
+      if (!Number.isNaN(dow) && candidate.getDay() === dow) {
+        return candidate.getTime();
+      }
+    }
+    return null;
+  }
+
+  _formatLocalDate(date) {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  _formatLocalTime(date) {
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
   }
 
   /**
@@ -663,44 +1173,6 @@ Please address the issues above and resubmit for review.
     }
   }
 
-  _analyzeComplexity(title, description = '') {
-    const text = `${title} ${description}`.toLowerCase();
-    let scores = { simple: 0, moderate: 0, complex: 0, epic: 0 };
-
-    for (const [level, keywords] of Object.entries(COMPLEXITY_SIGNALS)) {
-      for (const keyword of keywords) {
-        if (text.includes(keyword)) scores[level]++;
-      }
-    }
-
-    // Also factor in description length and numbered steps
-    const descLength = (description || '').length;
-    if (descLength > 2000) scores.complex += 2;
-    if (descLength > 5000) scores.epic += 2;
-
-    const steps = this._extractSteps(description);
-    if (steps.length > 5) scores.epic += 2;
-    else if (steps.length > 2) scores.complex++;
-
-    // Determine level
-    let level = 'moderate'; // default
-    let maxScore = scores.moderate;
-    for (const [l, s] of Object.entries(scores)) {
-      if (s > maxScore) { level = l; maxScore = s; }
-    }
-
-    // Compute a 0-100 score
-    const score = Math.min(100, Math.round(
-      (scores.epic * 25) + (scores.complex * 15) + (scores.moderate * 8) + (scores.simple * 3)
-    ));
-
-    return { level, score, scores };
-  }
-
-  _hasNumberedSteps(description = '') {
-    const stepPattern = /(?:^|\n)\s*(?:\d+[.)]\s|[-*]\s(?:step|phase|part)\s)/im;
-    return stepPattern.test(description);
-  }
 
   _extractSteps(description = '') {
     if (!description) return [];

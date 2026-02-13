@@ -7,6 +7,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Task, Priority, Status } from '@/types/task';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { io } from 'socket.io-client';
 
@@ -258,7 +259,13 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
                 </div>
 
                 <h2 className="text-2xl font-bold text-foreground mb-4">{task.title}</h2>
-                <p className="text-muted-foreground">{task.description}</p>
+                <div className="max-h-80 overflow-y-auto overflow-x-hidden pr-2 break-words themed-scrollbar bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+                  <div className="text-gray-100 leading-relaxed">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {task.description || ''}
+                    </ReactMarkdown>
+                  </div>
+                </div>
               </div>
 
               {/* Details */}
@@ -320,7 +327,7 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
                   </div>
 
                   <div className="flex items-center justify-start">
-                    <span className="text-sm text-muted-foreground w-24">Created</span>
+                    <span className="text-sm text-muted-foreground w-32">Created</span>
                     <div className="flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-muted-foreground" />
                       <span className="text-sm text-foreground">{format(task.createdAt, 'MMM d, yyyy')}</span>
@@ -329,7 +336,7 @@ export function TaskDetailModal({ task, isOpen, onClose, onEdit, onDelete, onSta
 
                   {task.dueDate && (
                     <div className="flex items-center justify-start">
-                      <span className="text-sm text-muted-foreground w-24">Deadline</span>
+                      <span className="text-sm text-muted-foreground w-32">Deadline</span>
                       <div className="flex items-center gap-2">
                         <CalendarClock className="w-4 h-4 text-destructive" />
                         <span className="text-sm text-destructive font-semibold">{format(task.dueDate, 'MMM d, yyyy')}</span>

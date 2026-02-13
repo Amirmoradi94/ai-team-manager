@@ -32,7 +32,7 @@ const navItems = [
   { icon: Brain, label: 'CTO', id: 'cto', badge: 'AI' },
   { icon: FolderKanban, label: 'Projects', id: 'projects' },
   { icon: Users, label: 'Teams', id: 'team' },
-  { icon: Zap, label: 'Team Roles', id: 'specialists' },
+  { icon: Zap, label: 'My Employees', id: 'employees' },
   { icon: Briefcase, label: 'Arsenal', id: 'arsenal', badge: 'NEW' },
   { icon: Calendar, label: 'Calendar', id: 'calendar' },
   { icon: BarChart3, label: 'Analytics', id: 'analytics' },
@@ -114,12 +114,12 @@ export function Sidebar({
           })}
         </div>
 
-        {/* Team Members Section (Humans Only) */}
+        {/* Company Leadership Section (Humans & AI) */}
         <div className="mt-8 px-2">
           <div className="flex items-center justify-between mb-2 px-2">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
               <Users className="w-3 h-3" />
-              Team Members
+              Company Leadership
             </span>
             <button
               onClick={onInvite}
@@ -194,7 +194,7 @@ export function Sidebar({
             </Avatar>
             <div className="flex-1">
               <p className="text-sm font-medium text-foreground">{currentUser.name}</p>
-              <p className="text-xs text-muted-foreground">{currentUser.role}</p>
+              <p className="text-xs text-muted-foreground capitalize">({currentUser.role})</p>
             </div>
           </div>
         </div>

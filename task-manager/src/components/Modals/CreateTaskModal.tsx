@@ -48,6 +48,29 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
   const [isDeadlineCalendarOpen, setIsDeadlineCalendarOpen] = useState<boolean>(false);
   const [isCustomTimeActive, setIsCustomTimeActive] = useState<boolean>(false);
 
+  useEffect(() => {
+    if (editingTask && isOpen) {
+      setTitle(editingTask.title || '');
+      setDescription(editingTask.description || '');
+      setPriority(editingTask.priority || 'medium');
+      setStatus(editingTask.status || defaultStatus);
+      setAssigneeId(editingTask.assignee?.id || '');
+      setProjectId(editingTask.project_id || '');
+      setAgentId((editingTask as any).agent_id || '');
+      setTeamId(editingTask.team_id || '');
+      setDeadline(editingTask.dueDate);
+      setScheduledDate(editingTask.scheduledDate);
+      setScheduledTime(editingTask.scheduledTime || '');
+      setIsCustomTimeActive(false);
+      return;
+    }
+
+    if (defaultSchedule?.date || defaultSchedule?.time) {
+      setScheduledDate(defaultSchedule.date);
+      setScheduledTime(defaultSchedule.time || '');
+    }
+  }, [editingTask, isOpen, defaultSchedule, defaultStatus]);
+
   // Auto-assign team lead when team is selected
   useEffect(() => {
     if (teamId && teams) {
@@ -63,6 +86,10 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
     e.preventDefault();
 
     const assignee = teamMembers.find(m => m.id === assigneeId);
+    const selectedTeam = teamId && teams ? teams.find(t => t.id === teamId) : null;
+    const teamLeadId = selectedTeam?.lead?.id || '';
+    const finalAssigneeId = agentId || assigneeId || teamLeadId || undefined;
+    const finalAgentId = agentId || teamLeadId || undefined;
 
     onSubmit({
       title,
@@ -70,13 +97,13 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
       priority,
       status,
       assignee,
-      assignee_id: agentId || assigneeId || undefined,
+      assignee_id: finalAssigneeId,
       project_id: projectId || undefined,
-      agent_id: agentId || undefined,
+      agent_id: finalAgentId,
       team_id: teamId || undefined,
-      due_date: deadline ? format(deadline, 'yyyy-MM-dd') : undefined,
-      scheduled_date: scheduledDate ? format(scheduledDate, 'yyyy-MM-dd') : undefined,
-      scheduled_time: scheduledTime || undefined,
+      dueDate: deadline,
+      scheduledDate,
+      scheduledTime: scheduledTime || undefined,
     });
 
     // Reset form
@@ -112,7 +139,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
             className="relative w-full max-w-lg z-10"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="glass-card-dark p-6 glow-border max-h-[85vh] overflow-y-auto custom-scrollbar">
+            <div className="glass-card-dark p-6 glow-border max-h-[85vh] overflow-y-auto overflow-x-hidden custom-scrollbar">
               <div className="flex items-center justify-between mb-6 sticky top-0 bg-background/80 backdrop-blur-md z-10 pb-2">
                 <h2 className="text-xl font-semibold text-foreground">{editingTask ? 'Edit Task' : 'Create New Task'}</h2>
                 <button
@@ -192,7 +219,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                     <label className="block text-sm font-medium text-foreground mb-2">
                       Project
                     </label>
-                    <Select value={projectId} onValueChange={setProjectId}>
+                    <Select value={projectId} onValueChange={(val) => setProjectId(val === 'none' ? '' : val)}>
                       <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
                         <SelectValue placeholder="Select project..." />
                       </SelectTrigger>
@@ -209,13 +236,13 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                     <label className="block text-sm font-medium text-foreground mb-2">
                       Team
                     </label>
-                    <Select value={agentId || teamId || assigneeId} onValueChange={(val) => {
+                    <Select value={teamId || agentId || assigneeId} onValueChange={(val) => {
                       const isTeam = teams?.find(t => t.id === val);
                       const isAi = agents.find(a => a.id === val);
                       
                       if (isTeam) {
                         setTeamId(val);
-                        setAgentId('');
+                        setAgentId(isTeam?.lead?.id || '');
                         setAssigneeId('');
                       } else if (isAi) {
                         setAgentId(val);

@@ -5,6 +5,7 @@ interface TaskBoardProps {
   tasks: Task[];
   onAddTask: (status: Status) => void;
   onTaskClick: (task: Task) => void;
+  onTaskDelete: (taskId: string) => void;
   onTaskMove?: (taskId: string, newStatus: Status) => void;
   currentUser?: User | null;
 }
@@ -18,7 +19,7 @@ const columns: { title: string; status: Status; locked?: boolean }[] = [
   { title: 'Done', status: 'done', locked: true }, // Only admin can move here
 ];
 
-export function TaskBoard({ tasks, onAddTask, onTaskClick, onTaskMove, currentUser }: TaskBoardProps) {
+export function TaskBoard({ tasks, onAddTask, onTaskClick, onTaskDelete, onTaskMove, currentUser }: TaskBoardProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 pb-4 px-1">
       {columns.map((column) => (
@@ -29,6 +30,7 @@ export function TaskBoard({ tasks, onAddTask, onTaskClick, onTaskMove, currentUs
           tasks={tasks.filter((task) => task.status === column.status)}
           onAddTask={onAddTask}
           onTaskClick={onTaskClick}
+          onTaskDelete={onTaskDelete}
           onTaskMove={onTaskMove}
           currentUser={currentUser}
           isLocked={column.locked && currentUser?.role !== 'admin'}

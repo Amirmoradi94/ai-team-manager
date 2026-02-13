@@ -14,6 +14,7 @@ const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { sendInvitationEmail } = require('./utils/emailService');
 const { cacheAPI, noCache } = require('./middleware/cache');
+const contextSync = require('./context-sync');
 
 // Import validators
 const { validateRegister, validateLogin, validateInvite } = require('./validators/authValidators');
@@ -228,7 +229,7 @@ db.run(`ALTER TABLE users ADD COLUMN cto_resource_status TEXT`, () => {}); // JS
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
 
-  // Create specialists table (Sub-Agents)
+  // Create employees table (Sub-Agents)
   db.run(`CREATE TABLE IF NOT EXISTS specialists (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -252,7 +253,7 @@ db.run(`ALTER TABLE users ADD COLUMN cto_resource_status TEXT`, () => {}); // JS
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // Link specialists to tools (The 'Equip' link)
+  // Link employees to tools (The 'Equip' link)
   db.run(`CREATE TABLE IF NOT EXISTS specialist_tools (
     specialist_id TEXT,
     tool_id TEXT,
@@ -273,7 +274,7 @@ db.run(`ALTER TABLE users ADD COLUMN cto_resource_status TEXT`, () => {}); // JS
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
   )`);
 
-  // Link specialists to teams
+  // Link employees to teams
   db.run(`CREATE TABLE IF NOT EXISTS team_specialists (
     team_id TEXT,
     specialist_id TEXT,
@@ -315,6 +316,9 @@ db.run(`ALTER TABLE users ADD COLUMN cto_resource_status TEXT`, () => {}); // JS
   db.run(`ALTER TABLE tasks ADD COLUMN model_used TEXT`, () => {});
   db.run(`ALTER TABLE tasks ADD COLUMN execution_started_at DATETIME`, () => {});
   db.run(`ALTER TABLE tasks ADD COLUMN execution_completed_at DATETIME`, () => {});
+
+  // Add attachments support for tasks
+  db.run(`ALTER TABLE tasks ADD COLUMN attachments TEXT`, () => {}); // JSON array of attachment objects
   db.run(`ALTER TABLE tasks ADD COLUMN failed_at DATETIME`, () => {}); // Track when task last failed
 
   // Initialize admin user
@@ -653,7 +657,7 @@ app.get('/api/auth/me', noCache, authenticateToken, async (req, res) => {
 
 // --- TASKS ROUTES ---
 
-app.get('/api/tasks', authenticateToken, cacheAPI(60), async (req, res) => { // Cache for 1 minute
+app.get('/api/tasks', authenticateToken, noCache, async (req, res) => {
   try {
     const tasks = await all(`
       SELECT t.*,
@@ -666,10 +670,14 @@ app.get('/api/tasks', authenticateToken, cacheAPI(60), async (req, res) => { // 
              c.name as creator_name,
              c.email as creator_email,
              c.avatar as creator_avatar,
-             c.role as creator_role
+             c.role as creator_role,
+             p.name as project_name,
+             tm.name as team_name
       FROM tasks t
       LEFT JOIN users u ON t.assignee_id = u.id
       LEFT JOIN users c ON t.created_by = c.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
       ORDER BY t.created_at DESC
     `);
 
@@ -704,9 +712,9 @@ app.get('/api/tasks/scheduled', authenticateToken, validateScheduledQuery, async
 
   try {
     const tasks = await all(`
-      SELECT t.*,
-             u.id as assignee_id,
-             u.name as assignee_name,
+      SELECT t.*, 
+             u.id as assignee_id, 
+             u.name as assignee_name, 
              u.email as assignee_email,
              u.avatar as assignee_avatar,
              u.role as assignee_role,
@@ -714,10 +722,14 @@ app.get('/api/tasks/scheduled', authenticateToken, validateScheduledQuery, async
              c.name as creator_name,
              c.email as creator_email,
              c.avatar as creator_avatar,
-             c.role as creator_role
+             c.role as creator_role,
+             p.name as project_name,
+             tm.name as team_name
       FROM tasks t
       LEFT JOIN users u ON t.assignee_id = u.id
       LEFT JOIN users c ON t.created_by = c.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
       WHERE t.scheduled_date IS NOT NULL
         AND t.scheduled_date >= ?
         AND t.scheduled_date <= ?
@@ -763,10 +775,14 @@ app.get('/api/tasks/:id', authenticateToken, async (req, res) => {
              c.name as creator_name,
              c.email as creator_email,
              c.avatar as creator_avatar,
-             c.role as creator_role
+             c.role as creator_role,
+             p.name as project_name,
+             tm.name as team_name
       FROM tasks t
       LEFT JOIN users u ON t.assignee_id = u.id
       LEFT JOIN users c ON t.created_by = c.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
       WHERE t.id = ?
     `, [req.params.id]);
 
@@ -800,15 +816,33 @@ app.get('/api/tasks/:id', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tasks', authenticateToken, validateCreateTask, async (req, res) => {
-  const { title, description, status, priority, due_date, assignee_id, scheduled_date, scheduled_time, project_id, agent_id } = req.body;
+  const { title, description, status, priority, due_date, assignee_id, scheduled_date, scheduled_time, project_id, agent_id, team_id, parent_id, task_type, resource_metadata, attachments } = req.body;
   const id = Math.random().toString(36).substr(2, 9);
   const created_by = req.user.id;
 
   try {
     await run(
-      `INSERT INTO tasks (id, title, description, status, priority, due_date, assignee_id, created_by, scheduled_date, scheduled_time, project_id, agent_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, title, description, status || 'todo', priority || 'medium', due_date, assignee_id, created_by, scheduled_date, scheduled_time, project_id, agent_id]
+      `INSERT INTO tasks (id, title, description, status, priority, due_date, assignee_id, created_by, scheduled_date, scheduled_time, project_id, agent_id, team_id, parent_id, task_type, resource_metadata, attachments)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        title,
+        description,
+        status || 'todo',
+        priority || 'medium',
+        due_date,
+        assignee_id,
+        created_by,
+        scheduled_date,
+        scheduled_time,
+        project_id,
+        agent_id,
+        team_id,
+        parent_id,
+        task_type || 'task',
+        resource_metadata,
+        attachments
+      ]
     );
     const newTask = await get(`
       SELECT t.*,
@@ -821,10 +855,14 @@ app.post('/api/tasks', authenticateToken, validateCreateTask, async (req, res) =
              c.name as creator_name,
              c.email as creator_email,
              c.avatar as creator_avatar,
-             c.role as creator_role
+             c.role as creator_role,
+             p.name as project_name,
+             tm.name as team_name
       FROM tasks t
       LEFT JOIN users u ON t.assignee_id = u.id
       LEFT JOIN users c ON t.created_by = c.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
       WHERE t.id = ?`, [id]);
 
     // Transform to include user objects
@@ -862,7 +900,8 @@ app.post('/api/tasks', authenticateToken, validateCreateTask, async (req, res) =
 app.put('/api/tasks/:id', authenticateToken, validateUpdateTask, async (req, res) => {
   const {
     title, description, status, priority, due_date, assignee_id, scheduled_date, scheduled_time,
-    execution_time, tokens_used, files_modified, model_used, execution_started_at, execution_completed_at
+    execution_time, tokens_used, files_modified, model_used, execution_started_at, execution_completed_at,
+    project_id, team_id, agent_id, resource_metadata
   } = req.body;
   const { id } = req.params;
 
@@ -883,6 +922,10 @@ app.put('/api/tasks/:id', authenticateToken, validateUpdateTask, async (req, res
         priority = COALESCE(?, priority),
         due_date = COALESCE(?, due_date),
         assignee_id = COALESCE(?, assignee_id),
+        project_id = COALESCE(?, project_id),
+        team_id = COALESCE(?, team_id),
+        agent_id = COALESCE(?, agent_id),
+        resource_metadata = COALESCE(?, resource_metadata),
         scheduled_date = COALESCE(?, scheduled_date),
         scheduled_time = COALESCE(?, scheduled_time),
         execution_time = COALESCE(?, execution_time),
@@ -892,8 +935,9 @@ app.put('/api/tasks/:id', authenticateToken, validateUpdateTask, async (req, res
         execution_started_at = COALESCE(?, execution_started_at),
         execution_completed_at = COALESCE(?, execution_completed_at)
        WHERE id = ?`,
-      [title, description, status, priority, due_date, assignee_id, scheduled_date, scheduled_time,
-       execution_time, tokens_used, files_modified, model_used, execution_started_at, execution_completed_at, id]
+      [title, description, status, priority, due_date, assignee_id, project_id, team_id, agent_id,
+       resource_metadata, scheduled_date, scheduled_time, execution_time, tokens_used, files_modified, model_used,
+       execution_started_at, execution_completed_at, id]
     );
     const updatedTask = await get(`
       SELECT t.*,
@@ -906,10 +950,14 @@ app.put('/api/tasks/:id', authenticateToken, validateUpdateTask, async (req, res
              c.name as creator_name,
              c.email as creator_email,
              c.avatar as creator_avatar,
-             c.role as creator_role
+             c.role as creator_role,
+             p.name as project_name,
+             tm.name as team_name
       FROM tasks t
       LEFT JOIN users u ON t.assignee_id = u.id
       LEFT JOIN users c ON t.created_by = c.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
       WHERE t.id = ?`, [id]);
 
     // Send webhook to Claude in these scenarios:
@@ -1073,17 +1121,19 @@ app.get('/api/tasks/:id/comments', authenticateToken, async (req, res) => {
 
 // Add a comment to a task
 app.post('/api/tasks/:id/comments', authenticateToken, async (req, res) => {
-  const { content, is_system } = req.body;
+  const { content, is_system, user_override } = req.body;
   const { id: task_id } = req.params;
 
   try {
     const comment_id = Math.random().toString(36).substr(2, 9);
     const user = req.user;
+    const commentUserId = user_override?.id || user.id;
+    const commentUserName = user_override?.name || user.name;
 
     await run(
       `INSERT INTO comments (id, task_id, user_id, user_name, content, is_system)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [comment_id, task_id, user.id, user.name, content, is_system || 0]
+      [comment_id, task_id, commentUserId, commentUserName, content, is_system || 0]
     );
 
     const comment = await get('SELECT * FROM comments WHERE id = ?', [comment_id]);
@@ -1108,7 +1158,7 @@ app.post('/api/tasks/:id/comments', authenticateToken, async (req, res) => {
 
 app.get('/api/users', authenticateToken, noCache, async (req, res) => {
   try {
-    const users = await all('SELECT id, name, email, role, avatar, created_at FROM users');
+    const users = await all('SELECT id, name, email, role, avatar, is_ai, created_at FROM users');
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1240,6 +1290,16 @@ app.get('/api/cto/resource-status', authenticateToken, async (req, res) => {
   } catch (err) {
     logger.error('Failed to fetch CTO resource status:', err);
     res.status(500).json({ error: 'Failed to fetch CTO resource status' });
+  }
+});
+
+// Trigger CTO resource refresh (runner will perform isolated checks)
+app.post('/api/cto/refresh-resources', authenticateToken, async (req, res) => {
+  try {
+    io.emit('cto:refresh-resources');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1547,6 +1607,11 @@ app.post('/api/projects', authenticateToken, async (req, res) => {
     const project = await get('SELECT * FROM projects WHERE id = ?', [id]);
     logger.info(`Project created: ${name} with ${team_ids?.length || 0} teams. Agent-runner will create .ai_task_context/ on next sync.`);
 
+    // Trigger context sync
+    contextSync.syncAfterProjectChange('created', id, project).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
+
     res.json(project);
   } catch (err) {
     logger.error('Failed to create project:', err);
@@ -1555,7 +1620,7 @@ app.post('/api/projects', authenticateToken, async (req, res) => {
 });
 
 app.put('/api/projects/:id', authenticateToken, async (req, res) => {
-  const { name, description, repository_path, global_rules } = req.body;
+  const { name, description, repository_path, global_rules, team_ids } = req.body;
   const { id } = req.params;
 
   try {
@@ -1579,8 +1644,28 @@ app.put('/api/projects/:id', authenticateToken, async (req, res) => {
        WHERE id = ?`,
       [name, description, repository_path, global_rules, id]
     );
+
+    // Update team assignments if provided
+    if (team_ids !== undefined && Array.isArray(team_ids)) {
+      // Delete existing team assignments
+      await run('DELETE FROM project_teams WHERE project_id = ?', [id]);
+
+      // Insert new team assignments
+      for (const teamId of team_ids) {
+        await run(
+          'INSERT INTO project_teams (project_id, team_id) VALUES (?, ?)',
+          [id, teamId]
+        );
+      }
+    }
+
     const updated = await get('SELECT * FROM projects WHERE id = ?', [id]);
-    logger.info(`Project updated: ${updated.name}. Agent-runner will sync .ai_task_context/ on next cycle.`);
+    logger.info(`Project updated: ${updated.name} with ${team_ids?.length || 0} teams. Agent-runner will sync .ai_task_context/ on next cycle.`);
+
+    // Trigger context sync
+    contextSync.syncAfterProjectChange('updated', id, updated).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
 
     res.json(updated);
   } catch (err) {
@@ -1601,6 +1686,11 @@ app.delete('/api/projects/:id', authenticateToken, async (req, res) => {
 
     // 3. Delete the project
     await run('DELETE FROM projects WHERE id = ?', [id]);
+
+    // Trigger context sync
+    contextSync.syncAfterProjectChange('deleted', id).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
 
     res.json({ success: true, message: 'Project and associated tasks deleted' });
   } catch (err) {
@@ -1856,17 +1946,50 @@ app.get('/api/runner/tasks', async (req, res) => {
           p.repository_path as project_repository_path,
           p.global_rules as project_global_rules,
           u.name as assignee_name,
-          c.name as creator_name
+          c.name as creator_name,
+          tm.name as team_name
         FROM tasks t
         LEFT JOIN projects p ON t.project_id = p.id
         LEFT JOIN users u ON t.assignee_id = u.id
         LEFT JOIN users c ON t.created_by = c.id
+        LEFT JOIN teams tm ON t.team_id = tm.id
         WHERE t.project_id = ?
-        AND t.status = 'todo'
+        AND t.status IN ('backlog', 'todo')
         ORDER BY t.created_at ASC
       `, [projectByToken.id]);
-      
-      return res.json(tasks);
+
+      // ========== SEQUENTIAL DEPENDENCY BLOCKING ==========
+      const filteredTasks = [];
+
+      for (const task of tasks) {
+        if (!task.parent_id || task.task_type !== 'subtask') {
+          filteredTasks.push(task);
+          continue;
+        }
+
+        const allSiblings = await all(`
+          SELECT id, status, created_at
+          FROM tasks
+          WHERE parent_id = ?
+          AND task_type = 'subtask'
+          ORDER BY created_at ASC
+        `, [task.parent_id]);
+
+        const taskIndex = allSiblings.findIndex(s => s.id === task.id);
+
+        if (taskIndex === 0) {
+          filteredTasks.push(task);
+        } else {
+          const previousSubtask = allSiblings[taskIndex - 1];
+          if (previousSubtask.status === 'done') {
+            filteredTasks.push(task);
+          } else {
+            console.log(`[CTO Blocker] Subtask "${task.title}" blocked. Previous not approved (status: ${previousSubtask.status})`);
+          }
+        }
+      }
+
+      return res.json(filteredTasks);
     }
 
     // 2. Fallback: check if this is a user-wide runner token
@@ -1899,17 +2022,59 @@ app.get('/api/runner/tasks', async (req, res) => {
         p.repository_path as project_repository_path,
         p.global_rules as project_global_rules,
         u.name as assignee_name,
-        c.name as creator_name
+        c.name as creator_name,
+        tm.name as team_name
       FROM tasks t
       LEFT JOIN projects p ON t.project_id = p.id
       LEFT JOIN users u ON t.assignee_id = u.id
       LEFT JOIN users c ON t.created_by = c.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
       WHERE t.project_id IN (${placeholders})
-      AND t.status = 'todo'
+      AND t.status IN ('backlog', 'todo')
       ORDER BY t.created_at ASC
     `, projectIds);
 
-    res.json(tasks);
+    // ========== SEQUENTIAL DEPENDENCY BLOCKING ==========
+    // For subtasks: Block execution if previous subtask isn't approved (status='done')
+    const filteredTasks = [];
+
+    for (const task of tasks) {
+      // If not a subtask, always include it
+      if (!task.parent_id || task.task_type !== 'subtask') {
+        filteredTasks.push(task);
+        continue;
+      }
+
+      // For subtasks: check if there's a previous subtask that needs completion
+      const allSiblings = await all(`
+        SELECT id, status, created_at
+        FROM tasks
+        WHERE parent_id = ?
+        AND task_type = 'subtask'
+        ORDER BY created_at ASC
+      `, [task.parent_id]);
+
+      // Find this task's position in the sequence
+      const taskIndex = allSiblings.findIndex(s => s.id === task.id);
+
+      if (taskIndex === 0) {
+        // First subtask - always allowed
+        filteredTasks.push(task);
+      } else {
+        // Check if previous subtask is done
+        const previousSubtask = allSiblings[taskIndex - 1];
+
+        if (previousSubtask.status === 'done') {
+          // Previous subtask approved - proceed
+          filteredTasks.push(task);
+        } else {
+          // Block this subtask - previous one not approved
+          console.log(`[CTO Blocker] Subtask "${task.title}" blocked. Previous subtask not approved yet (status: ${previousSubtask.status})`);
+        }
+      }
+    }
+
+    res.json(filteredTasks);
   } catch (err) {
     logger.error('Failed to fetch runner tasks:', err);
     res.status(500).json({ error: err.message });
@@ -1921,10 +2086,11 @@ app.get('/api/tasks/:id/subtasks', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const subtasks = await all(`
-      SELECT t.*, u.name as assignee_name, p.name as project_name
+      SELECT t.*, u.name as assignee_name, p.name as project_name, tm.name as team_name
       FROM tasks t
       LEFT JOIN users u ON t.assignee_id = u.id
       LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN teams tm ON t.team_id = tm.id
       WHERE t.parent_id = ?
       ORDER BY t.created_at ASC
     `, [id]);
@@ -1976,6 +2142,159 @@ app.post('/api/ai/enhance', authenticateToken, async (req, res) => {
 // Test endpoint
 app.get('/api/ai/test', (req, res) => {
   res.json({ message: 'AI routes are working!' });
+});
+
+// Load comprehensive skills pool
+let SKILLS_POOL_CACHE = null;
+function getSkillsPool() {
+  if (!SKILLS_POOL_CACHE) {
+    try {
+      SKILLS_POOL_CACHE = require('./skills-pool.json');
+      logger.info(`Loaded ${SKILLS_POOL_CACHE.length} skills from pool`);
+    } catch (err) {
+      logger.error('Failed to load skills pool:', err);
+      SKILLS_POOL_CACHE = [];
+    }
+  }
+  return SKILLS_POOL_CACHE;
+}
+
+app.post('/api/ai/analyze-skills', authenticateToken, async (req, res) => {
+  const { name, description } = req.body;
+  if (!description) return res.status(400).json({ error: 'Description is required' });
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'AI not configured' });
+  }
+
+  try {
+    const OpenAI = require('openai');
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    // Load comprehensive skills pool
+    const skillsPool = getSkillsPool();
+
+    // Group skills by category for better organization
+    const skillsByCategory = skillsPool.reduce((acc, skill) => {
+      if (!acc[skill.category]) acc[skill.category] = [];
+      acc[skill.category].push(`${skill.id} (${skill.label})`);
+      return acc;
+    }, {});
+
+    // Create comprehensive skill list for prompt
+    const skillsList = Object.entries(skillsByCategory)
+      .map(([category, skills]) => `${category}:\n- ${skills.join('\n- ')}`)
+      .join('\n\n');
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a talent acquisition specialist. Analyze the employee class name and description and suggest the most relevant skills from the provided comprehensive pool of ${skillsPool.length} skills.
+
+COMPLETE SKILLS POOL (590 skills from skills.sh registry):
+
+${skillsList}
+
+Your task:
+1. Analyze the employee name and description carefully
+2. Select 5-8 skills that are MOST relevant to this role
+3. Prioritize skills that directly match the role's core responsibilities
+4. Include both technical and soft skills when appropriate
+5. Only select from the skill IDs provided above
+
+Return a JSON object with a "skillIds" key containing an array of skill IDs (use exact IDs from above).
+
+Example format: {"skillIds": ["frontend-design", "react", "typescript"]}`
+        },
+        {
+          role: "user",
+          content: `Employee Name: ${name}\nDescription: ${description}`
+        }
+      ],
+      temperature: 0.3,
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(response.choices[0].message.content.trim());
+    res.json(result);
+  } catch (err) {
+    logger.error('Skill analysis failed:', err);
+    res.status(500).json({ error: 'Skill analysis failed' });
+  }
+});
+
+// AI-powered employee suggestions for team composition
+app.post('/api/ai/suggest-team-employees', authenticateToken, async (req, res) => {
+  const { teamName, mission } = req.body;
+
+  if (!teamName || !mission) {
+    return res.status(400).json({ error: 'Team name and mission are required' });
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'AI not configured' });
+  }
+
+  try {
+    const OpenAI = require('openai');
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    // Query ALL specialists from database instead of relying on frontend
+    const allEmployees = await all('SELECT * FROM specialists ORDER BY name ASC');
+
+    if (!allEmployees || allEmployees.length === 0) {
+      return res.status(200).json({ employeeIds: [] });
+    }
+
+    // Create employee list with skills
+    const employeesList = allEmployees.map(emp => {
+      let skills = [];
+      try {
+        skills = JSON.parse(emp.tools || '[]');
+      } catch (e) {
+        skills = [];
+      }
+      return `- ${emp.id}: ${emp.name} - ${emp.description || 'No description'} (Skills: ${skills.join(', ') || 'none'})`;
+    }).join('\n');
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a team composition expert. Analyze the team's name and mission, then suggest the most suitable employees from the available pool.
+
+AVAILABLE EMPLOYEES:
+${employeesList}
+
+Your task:
+1. Understand the team's purpose from its name and mission
+2. Select 3-6 employees whose skills and descriptions best match the team's needs
+3. Prioritize employees whose expertise directly aligns with the team's mission
+4. Consider diverse skill sets to create a well-rounded team
+5. Only select from the employee IDs provided above
+
+Return a JSON object with an "employeeIds" key containing an array of employee IDs.
+
+Example format: {"employeeIds": ["abc123", "def456", "ghi789"]}`
+        },
+        {
+          role: "user",
+          content: `Team Name: ${teamName}\nMission: ${mission}`
+        }
+      ],
+      temperature: 0.3,
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(response.choices[0].message.content.trim());
+    res.json(result);
+  } catch (err) {
+    logger.error('Team employee suggestion failed:', err);
+    res.status(500).json({ error: 'Employee suggestion failed' });
+  }
 });
 
 app.post('/api/ai/recommendations', authenticateToken, async (req, res) => {
@@ -2053,13 +2372,13 @@ app.get('/api/teams', authenticateToken, async (req, res) => {
   try {
     const teams = await all('SELECT * FROM teams ORDER BY created_at DESC');
 
-    // Enrich teams with their Lead and Specialists
+    // Enrich teams with their Lead and Employees
     const detailedTeams = await Promise.all(teams.map(async (team) => {
       // 1. Get Team Lead
       const lead = await get('SELECT * FROM users WHERE team_id = ? AND is_team_lead = 1', [team.id]);
-      
-      // 2. Get Specialists
-      const specialists = await all(`
+
+      // 2. Get Employees (Specialists)
+      const employees = await all(`
         SELECT s.* FROM specialists s
         JOIN team_specialists ts ON s.id = ts.specialist_id
         WHERE ts.team_id = ?
@@ -2071,7 +2390,7 @@ app.get('/api/teams', authenticateToken, async (req, res) => {
       return {
         ...team,
         lead: lead || null,
-        specialists: specialists || [],
+        employees: employees || [],
         project_name: project ? project.name : null
       };
     }));
@@ -2141,7 +2460,12 @@ app.post('/api/teams', authenticateToken, async (req, res) => {
     // Return the full team object
     const newTeam = await get('SELECT * FROM teams WHERE id = ?', [teamId]);
     // (Ideally we'd fetch the enriched object like in GET, but basic is fine for now)
-    
+
+    // Trigger context sync
+    contextSync.syncAfterTeamChange('created', teamId, newTeam).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
+
     res.json(newTeam);
   } catch (err) {
     logger.error('Failed to create team:', err);
@@ -2218,6 +2542,11 @@ app.delete('/api/teams/:id', authenticateToken, async (req, res) => {
 
     // 3. Delete Team
     await run('DELETE FROM teams WHERE id = ?', [id]);
+
+    // Trigger context sync
+    contextSync.syncAfterTeamChange('deleted', id).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
 
     res.json({ success: true, message: 'Team deleted' });
   } catch (err) {
@@ -2317,7 +2646,21 @@ app.delete('/api/agents/:id', authenticateToken, async (req, res) => {
 
 // --- SPECIALISTS (SUB-AGENTS) ROUTES ---
 
+// Public test endpoint
+app.get('/api/test-employees', (req, res) => {
+  res.json({ message: 'Employees endpoint reached' });
+});
+
 app.get('/api/specialists', authenticateToken, async (req, res) => {
+  try {
+    const specialists = await all('SELECT * FROM specialists ORDER BY name ASC');
+    res.json(specialists);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/employees', authenticateToken, async (req, res) => {
   try {
     const specialists = await all('SELECT * FROM specialists ORDER BY name ASC');
     res.json(specialists);
@@ -2337,6 +2680,56 @@ app.post('/api/specialists', authenticateToken, async (req, res) => {
     );
     const specialist = await get('SELECT * FROM specialists WHERE id = ?', [id]);
     res.json(specialist);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/employees', authenticateToken, async (req, res) => {
+  const { name, description, system_prompt, tools } = req.body;
+  const id = Math.random().toString(36).substr(2, 9);
+
+  try {
+    await run(
+      'INSERT INTO specialists (id, name, description, system_prompt, tools) VALUES (?, ?, ?, ?, ?)',
+      [id, name, description, system_prompt, JSON.stringify(tools || [])]
+    );
+    const specialist = await get('SELECT * FROM specialists WHERE id = ?', [id]);
+
+    // Trigger context sync
+    contextSync.syncAfterEmployeeChange('created', id, specialist).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
+
+    res.json(specialist);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/specialists/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    await run('DELETE FROM team_specialists WHERE specialist_id = ?', [id]);
+    await run('DELETE FROM specialists WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Employee deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    await run('DELETE FROM team_specialists WHERE specialist_id = ?', [id]);
+    await run('DELETE FROM specialists WHERE id = ?', [id]);
+
+    // Trigger context sync
+    contextSync.syncAfterEmployeeChange('deleted', id).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
+
+    res.json({ success: true, message: 'Employee deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2422,7 +2815,9 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
       agent = await get('SELECT name, system_prompt, model_config FROM users WHERE team_id = ? AND is_team_lead = 1', [task.team_id]);
       
       // Get Team Details
-      team = await get('SELECT name, mission_statement, human_in_the_loop FROM teams WHERE id = ?', [task.team_id]);
+      const teamRow = await get('SELECT name, mission_statement, human_in_the_loop FROM teams WHERE id = ?', [task.team_id]);
+      const teamLead = await get('SELECT id, name FROM users WHERE team_id = ? AND is_team_lead = 1', [task.team_id]);
+      team = teamRow ? { ...teamRow, lead: teamLead || null, specialists } : null;
 
       // Get Team Specialists
       specialists = await all(`
@@ -2451,7 +2846,18 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
         id: task.id,
         title: task.title,
         description: task.description,
-        priority: task.priority
+        priority: task.priority,
+        status: task.status,
+        due_date: task.due_date,
+        scheduled_date: task.scheduled_date,
+        scheduled_time: task.scheduled_time,
+        project_id: task.project_id,
+        team_id: task.team_id,
+        agent_id: task.agent_id,
+        assignee_id: task.assignee_id,
+        parent_id: task.parent_id,
+        task_type: task.task_type,
+        created_at: task.created_at
       },
       identity: agent || { name: 'Generic Agent', system_prompt: 'You are a helpful assistant.' },
       team: team || { name: 'General', mission_statement: 'Execute tasks.' },

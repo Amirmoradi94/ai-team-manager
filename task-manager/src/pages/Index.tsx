@@ -13,11 +13,11 @@ import { CreateProjectModal } from '@/components/Modals/CreateProjectModal';
 import { CreateTeamModal } from '@/components/Modals/CreateTeamModal';
 import { TeamDetailModal } from '@/components/Modals/TeamDetailModal';
 import { AssignTeamsModal } from '@/components/Modals/AssignTeamsModal';
-import { AssignSpecialistsModal } from '@/components/Modals/AssignSpecialistsModal';
+import { AssignEmployeesModal } from '@/components/Modals/AssignEmployeesModal';
 import { CreateAgentModal } from '@/components/Modals/CreateAgentModal';
-import { CreateSpecialistModal } from '@/components/Modals/CreateSpecialistModal';
-import { SpecialistTemplatesModal } from '@/components/Modals/SpecialistTemplatesModal';
-import { SpecialistTemplate } from '@/data/specialistTemplates';
+import { CreateEmployeeModal } from '@/components/Modals/CreateEmployeeModal';
+import { EmployeeTemplatesModal } from '@/components/Modals/EmployeeTemplatesModal';
+import { EmployeeTemplate } from '@/data/employeeTemplates';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,15 +64,15 @@ const Index = () => {
   const [projectAssigningTeams, setProjectAssigningTeams] = useState<any | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
-  const [specialistToDelete, setSpecialistToDelete] = useState<string | null>(null);
+  const [employeeToDelete, setEmployeeToDelete] = useState<string | null>(null);
   const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
   const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<any | null>(null);
-  const [teamAssigningSpecialists, setTeamAssigningSpecialists] = useState<any | null>(null);
+  const [teamAssigningEmployees, setTeamAssigningEmployees] = useState<any | null>(null);
   const [selectedTeamForDetail, setSelectedTeamForDetail] = useState<any | null>(null);
-  const [isCreateSpecialistOpen, setIsCreateSpecialistOpen] = useState(false);
-  const [isSpecialistTemplatesOpen, setIsSpecialistTemplatesOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<SpecialistTemplate | null>(null);
+  const [isCreateEmployeeOpen, setIsCreateEmployeeOpen] = useState(false);
+  const [isEmployeeTemplatesOpen, setIsEmployeeTemplatesOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<EmployeeTemplate | null>(null);
   const [editingAgent, setEditingAgent] = useState<any>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -84,7 +84,7 @@ const Index = () => {
   const [projects, setProjects] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
-  const [specialists, setSpecialists] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
   const [defaultSchedule, setDefaultSchedule] = useState<{ date?: Date; time?: string }>({});
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
     return (localStorage.getItem('theme') as 'light' | 'dark' | 'system') || 'dark';
@@ -106,7 +106,7 @@ const Index = () => {
           await fetchProjects(token);
           await fetchAgents(token);
           await fetchTeams(token);
-          await fetchSpecialists(token);
+          await fetchEmployees(token);
           setIsAuthenticated(true);
         } catch (e) {
           // Token invalid, clear it
@@ -133,9 +133,9 @@ const Index = () => {
     } else if (activeTab === 'team') {
       const token = localStorage.getItem('token');
       if (token) fetchTeams(token);
-    } else if (activeTab === 'specialists') {
+    } else if (activeTab === 'employees') {
       const token = localStorage.getItem('token');
-      if (token) fetchSpecialists(token);
+      if (token) fetchEmployees(token);
     }
   }, [activeTab, currentWeek]);
 
@@ -188,7 +188,12 @@ const Index = () => {
         status: t.status,
         priority: t.priority,
         dueDate: t.due_date ? new Date(t.due_date) : undefined,
-        scheduledDate: t.scheduled_date ? new Date(t.scheduled_date) : undefined,
+        scheduledDate: t.scheduled_date
+          ? (() => {
+              const [y, m, d] = t.scheduled_date.split('-').map(Number);
+              return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+            })()
+          : undefined,
         scheduledTime: t.scheduled_time || undefined,
         tags: [],
         assignee: t.assignee_id ? { id: t.assignee_id, name: t.assignee_name, avatar: t.assignee_avatar || '/placeholder.svg', email: t.assignee_email, role: t.assignee_role } : undefined,
@@ -201,7 +206,14 @@ const Index = () => {
         model_used: t.model_used,
         execution_started_at: t.execution_started_at,
         execution_completed_at: t.execution_completed_at,
-        failed_at: t.failed_at
+        failed_at: t.failed_at,
+        parent_id: t.parent_id,
+        task_type: t.task_type,
+        project_id: t.project_id,
+        project_name: t.project_name,
+        team_id: t.team_id,
+        team_name: t.team_name,
+        resource_metadata: t.resource_metadata
       }));
       setTasks(formattedTasks);
     } catch (e) {
@@ -216,6 +228,10 @@ const Index = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
+      if (!Array.isArray(data)) {
+        setTeamMembers([]);
+        return;
+      }
       // Format users for UI
       const formattedUsers = data.map((u: any) => ({
         id: u.id,
@@ -227,6 +243,7 @@ const Index = () => {
       setTeamMembers(formattedUsers);
     } catch (e) {
       console.error(e);
+      setTeamMembers([]);
     }
   };
 
@@ -236,9 +253,10 @@ const Index = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setProjects(data);
+      setProjects(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setProjects([]);
     }
   };
 
@@ -248,9 +266,10 @@ const Index = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setAgents(data);
+      setAgents(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setAgents([]);
     }
   };
 
@@ -260,9 +279,10 @@ const Index = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setTeams(data);
+      setTeams(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setTeams([]);
     }
   };
 
@@ -322,43 +342,44 @@ const Index = () => {
     }
   };
 
-  const fetchSpecialists = async (token: string) => {
+  const fetchEmployees = async (token: string) => {
     try {
-      const res = await fetch(`${API_URL}/specialists`, {
+      const res = await fetch(`${API_URL}/employees`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setSpecialists(data);
+      setEmployees(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setEmployees([]);
     }
   };
 
 
-  const deleteSpecialist = (id: string) => {
-    setSpecialistToDelete(id);
+  const deleteEmployee = (id: string) => {
+    setEmployeeToDelete(id);
   };
 
-  const handleConfirmDeleteSpecialist = async () => {
-    if (!specialistToDelete) return;
+  const handleConfirmDeleteEmployee = async () => {
+    if (!employeeToDelete) return;
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/specialists/${specialistToDelete}`, {
+      const res = await fetch(`${API_URL}/employees/${employeeToDelete}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (res.ok) {
         toast.success('Role deleted successfully');
-        fetchSpecialists(token!);
+        fetchEmployees(token!);
       } else {
         throw new Error('Failed to delete role');
       }
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete role');
     } finally {
-      setSpecialistToDelete(null);
+      setEmployeeToDelete(null);
     }
   };
 
@@ -389,7 +410,12 @@ const Index = () => {
         status: t.status,
         priority: t.priority,
         dueDate: t.due_date ? new Date(t.due_date) : undefined,
-        scheduledDate: t.scheduled_date ? new Date(t.scheduled_date) : undefined,
+        scheduledDate: t.scheduled_date
+          ? (() => {
+              const [y, m, d] = t.scheduled_date.split('-').map(Number);
+              return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+            })()
+          : undefined,
         scheduledTime: t.scheduled_time || undefined,
         tags: [],
         assignee: t.assignee_id ? { id: t.assignee_id, name: t.assignee_name, avatar: t.assignee_avatar || '/placeholder.svg', email: t.assignee_email, role: t.assignee_role } : undefined,
@@ -402,7 +428,9 @@ const Index = () => {
         model_used: t.model_used,
         execution_started_at: t.execution_started_at,
         execution_completed_at: t.execution_completed_at,
-        failed_at: t.failed_at
+        failed_at: t.failed_at,
+        parent_id: t.parent_id,
+        task_type: t.task_type
       }));
       setScheduledTasks(formattedTasks);
     } catch (e: any) {
@@ -443,10 +471,11 @@ const Index = () => {
             description: taskData.description,
             status: taskData.status,
             priority: taskData.priority,
-            due_date: taskData.dueDate,
-            assignee_id: taskData.assignee?.id,
+            due_date: taskData.dueDate ? taskData.dueDate.toISOString().split('T')[0] : undefined,
+            assignee_id: (taskData as any).assignee_id || taskData.assignee?.id,
             team_id: (taskData as any).team_id,
             agent_id: (taskData as any).agent_id,
+            project_id: (taskData as any).project_id,
             scheduled_date: taskData.scheduledDate ? taskData.scheduledDate.toISOString().split('T')[0] : undefined,
             scheduled_time: taskData.scheduledTime
           })
@@ -473,10 +502,11 @@ const Index = () => {
             description: taskData.description,
             status: taskData.status || defaultStatus,
             priority: taskData.priority,
-            due_date: taskData.dueDate,
-            assignee_id: taskData.assignee?.id,
+            due_date: taskData.dueDate ? taskData.dueDate.toISOString().split('T')[0] : undefined,
+            assignee_id: (taskData as any).assignee_id || taskData.assignee?.id,
             team_id: (taskData as any).team_id,
             agent_id: (taskData as any).agent_id,
+            project_id: (taskData as any).project_id,
             scheduled_date: taskData.scheduledDate ? taskData.scheduledDate.toISOString().split('T')[0] : undefined,
             scheduled_time: taskData.scheduledTime
           })
@@ -706,7 +736,7 @@ const Index = () => {
         currentUser={currentUser}
         teamMembers={teamMembers}
         teams={teams}
-        specialists={specialists}
+        employees={employees}
         onInvite={() => setIsInviteModalOpen(true)}
         onManageUsers={() => setIsUserManagementOpen(true)}
         activeTab={activeTab}
@@ -717,13 +747,13 @@ const Index = () => {
         }}
         onDeleteTeam={deleteTeam}
         onEditTeam={handleEditTeam}
-        onDeleteSpecialist={(specialistId) => {
-          // TODO: Implement specialist deletion
-          toast.error('Specialist deletion not yet implemented');
+        onDeleteEmployee={(employeeId) => {
+          // TODO: Implement employee deletion
+          toast.error('Employee deletion not yet implemented');
         }}
-        onEditSpecialist={(specialist) => {
-          // TODO: Implement specialist editing
-          toast.error('Specialist editing not yet implemented');
+        onEditEmployee={(employee) => {
+          // TODO: Implement employee editing
+          toast.error('Employee editing not yet implemented');
         }}
       />
 
@@ -733,7 +763,7 @@ const Index = () => {
             activeTab === 'dashboard' ? { label: 'New Task', onClick: () => setIsCreateModalOpen(true) } :
             activeTab === 'projects' ? { label: 'New Project', onClick: () => setIsCreateProjectOpen(true) } :
             activeTab === 'team' ? { label: 'Create Team', onClick: () => setIsCreateTeamOpen(true) } :
-            activeTab === 'specialists' ? { label: 'Add Role', onClick: () => setIsSpecialistTemplatesOpen(true) } :
+            activeTab === 'employees' ? { label: 'Add Employee', onClick: () => setIsEmployeeTemplatesOpen(true) } :
             undefined
           }
           searchQuery={searchQuery}
@@ -768,6 +798,7 @@ const Index = () => {
                   tasks={filteredTasks}
                   onAddTask={handleAddTask}
                   onTaskClick={setSelectedTask}
+                  onTaskDelete={handleDeleteTask}
                   onTaskMove={handleTaskMove}
                   currentUser={currentUser}
                 />
@@ -784,66 +815,72 @@ const Index = () => {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-foreground">Projects</h2>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {projects.map(project => {
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {Array.isArray(projects) && projects.map(project => {
                   const lastSeen = project.last_seen || project.creator_runner_last_seen;
                   // SQLite uses YYYY-MM-DD HH:MM:SS in UTC. Append 'Z' and replace space with 'T' for reliable ISO parsing
                   const isOnline = lastSeen && (Date.now() - new Date(lastSeen.replace(' ', 'T') + 'Z').getTime() < 60000);
                   const connectCommand = `npx agent-runner connect --token=${project.runner_token} --url=${API_URL}`;
 
                   return (
-                    <div key={project.id} className="glass-card p-4 border border-border hover:border-primary/50 transition-all group relative flex flex-col">
+                    <div key={project.id} className="glass-card p-5 border-2 border-transparent hover:border-gradient transition-all duration-300 group relative flex flex-col bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-cyan-500/10 hover:from-emerald-500/15 hover:via-teal-500/15 hover:to-cyan-500/15 shadow-lg hover:shadow-2xl hover:shadow-emerald-500/20 rounded-xl">
                       {/* Action buttons - top right */}
-                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10">
+                      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-2 z-10">
                         <button
                           onClick={() => setProjectAssigningTeams(project)}
-                          className="p-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                          className="p-2 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-500 text-white hover:from-teal-600 hover:to-cyan-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
                           title="Assign teams"
                         >
-                          <Users className="w-3.5 h-3.5" />
+                          <Users className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleEditProject(project)}
-                          className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
+                          className="p-2 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white hover:from-cyan-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
                           title="Edit project"
                         >
-                          <Pencil className="w-3.5 h-3.5" />
+                          <Pencil className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteProject(project.id)}
-                          className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
+                          className="p-2 rounded-lg bg-gradient-to-br from-rose-500 to-red-500 text-white hover:from-rose-600 hover:to-red-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
                           title="Delete project"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
 
-                      <div className="mb-2">
-                        <h3 className="text-xl font-semibold text-foreground group-hover:text-primary transition-colors pr-16">{capitalize(project.name)}</h3>
+                      <div className="mb-3">
+                        <h3 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 bg-clip-text text-transparent group-hover:from-emerald-300 group-hover:via-teal-300 group-hover:to-cyan-300 transition-all pr-16">{capitalize(project.name)}</h3>
                       </div>
-                      <h4 className="text-xs text-muted-foreground mb-1 uppercase font-bold tracking-wider">Project Overview</h4>
-                      <p className="text-base text-muted-foreground mb-3 line-clamp-2">{project.description}</p>
+                      <h4 className="text-xs text-emerald-400 mb-2 uppercase font-bold tracking-wider flex items-center gap-1">
+                        <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Project Overview
+                      </h4>
+                      <p className="text-base text-gray-200 mb-4 line-clamp-2 leading-relaxed">{project.description}</p>
 
-                      <div className="space-y-2 mt-auto">
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary/50 p-2.5 rounded">
-                          <Terminal className="w-4 h-4 text-primary flex-shrink-0" />
-                          <code className="truncate">{project.repository_path}</code>
+                      <div className="space-y-3 mt-auto">
+                        <div className="flex items-center gap-3 text-sm bg-gradient-to-r from-teal-500/20 to-cyan-500/20 border-2 border-teal-400/30 p-3 rounded-lg backdrop-blur-sm hover:border-teal-400/50 transition-colors">
+                          <Terminal className="w-5 h-5 text-teal-400 flex-shrink-0 animate-pulse" />
+                          <code className="truncate text-teal-100 text-xs font-medium">{project.repository_path}</code>
                         </div>
 
                         {project.global_rules && (
-                          <div className="bg-primary/5 border border-primary/10 rounded-lg p-3">
-                            <p className="text-xs text-muted-foreground mb-1.5 uppercase font-bold tracking-wider">Global Rules</p>
-                            <p className="text-sm text-muted-foreground line-clamp-2 italic">{project.global_rules}</p>
+                          <div className="bg-gradient-to-br from-emerald-500/20 via-teal-500/20 to-cyan-500/20 border-2 border-emerald-400/40 rounded-lg p-4 backdrop-blur-sm hover:border-emerald-400/60 transition-colors">
+                            <p className="text-xs text-emerald-300 mb-2 uppercase font-bold tracking-wider flex items-center gap-1">
+                              <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>
+                              Global Rules
+                            </p>
+                            <p className="text-sm text-gray-100 line-clamp-2 italic leading-relaxed">{project.global_rules}</p>
                           </div>
                         )}
 
                         {/* Assigned Teams Badges */}
                         {project.teams && project.teams.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 pt-2">
+                          <div className="flex flex-wrap gap-2 pt-2">
                             {project.teams.map((team: any) => (
                               <div
                                 key={team.id}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-200 border-2 border-cyan-400/40 hover:from-cyan-500/40 hover:to-blue-500/40 hover:border-cyan-400/60 transition-all hover:scale-105 shadow-sm"
                                 title={team.mission_statement || team.name}
                               >
                                 <Users className="w-3 h-3" />
@@ -872,76 +909,76 @@ const Index = () => {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-foreground">Teams</h2>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {teams.map(team => (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {Array.isArray(teams) && teams.map(team => (
                   <div
                     key={team.id}
                     onClick={() => setSelectedTeamForDetail(team)}
-                    className="glass-card p-4 border border-border hover:border-primary/50 transition-all group hover:shadow-lg relative cursor-pointer"
+                    className="glass-card p-5 border-2 border-transparent hover:border-gradient transition-all duration-300 group relative cursor-pointer bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-cyan-500/10 hover:from-emerald-500/15 hover:via-teal-500/15 hover:to-cyan-500/15 shadow-lg hover:shadow-2xl hover:shadow-emerald-500/20 rounded-xl"
                   >
-                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10">
+                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-2 z-10">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setTeamAssigningSpecialists(team);
+                          setTeamAssigningEmployees(team);
                         }}
-                        className="p-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                        title="Assign AI specialists"
+                        className="p-2 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                        title="Assign AI employees"
                       >
-                        <Cpu className="w-3.5 h-3.5" />
+                        <Cpu className="w-4 h-4" />
                       </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleEditTeam(team);
                         }}
-                        className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
+                        className="p-2 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white hover:from-cyan-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
                         title="Edit team"
                       >
-                        <Pencil className="w-3.5 h-3.5" />
+                        <Pencil className="w-4 h-4" />
                       </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteTeam(team.id);
                         }}
-                        className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
+                        className="p-2 rounded-lg bg-gradient-to-br from-rose-500 to-red-500 text-white hover:from-rose-600 hover:to-red-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
                         title="Delete team"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="p-3 rounded-full bg-primary/10 text-primary">
-                        <Users className="w-6 h-6" />
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/30 to-teal-500/30 shadow-lg">
+                        <Users className="w-7 h-7 text-emerald-200" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-xl font-semibold text-foreground group-hover:text-primary transition-colors truncate">{capitalize(team.name)}</h3>
+                        <h3 className="text-xl font-bold bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 bg-clip-text text-transparent group-hover:from-emerald-300 group-hover:via-teal-300 group-hover:to-cyan-300 transition-all truncate">{capitalize(team.name)}</h3>
                       </div>
                     </div>
 
-                    <p className="text-base text-muted-foreground line-clamp-2 mb-3 h-12">{team.mission_statement}</p>
+                    <p className="text-base text-gray-200 line-clamp-2 mb-4 h-12 leading-relaxed">{team.mission_statement}</p>
 
                     {/* Team Composition */}
-                    <div className="space-y-3 border-t border-border/50 pt-4">
+                    <div className="space-y-3 border-t-2 border-gradient pt-4">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
-                            <Bot className="w-3.5 h-3.5 text-primary" />
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1 bg-gradient-to-r from-teal-500/20 to-cyan-500/20 border-2 border-teal-400/30 rounded-lg p-2 backdrop-blur-sm">
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-md">
+                            <Bot className="w-4 h-4 text-white" />
                           </div>
-                          <p className="text-sm font-medium text-foreground truncate">
-                            Lead: {team.lead?.name ? capitalize(team.lead.name) : 'Unassigned'}
+                          <p className="text-sm font-bold text-teal-200 truncate">
+                            {team.lead?.name ? capitalize(team.lead.name) : 'No Lead'}
                           </p>
                         </div>
 
-                        {team.specialists && team.specialists.length > 0 && (
+                        {team.employees && team.employees.length > 0 && (
                           <div className="flex -space-x-2 overflow-hidden px-1">
                             <TooltipProvider>
-                              {team.specialists.slice(0, 3).map((spec: any) => (
+                              {team.employees.slice(0, 3).map((spec: any) => (
                                 <Tooltip key={spec.id}>
                                   <TooltipTrigger asChild>
-                                    <div className="inline-flex items-center justify-center w-6 h-6 rounded-full border-2 border-background bg-sidebar-accent text-[10px] font-bold text-primary hover:bg-primary/20 transition-colors cursor-help">
+                                    <div className="inline-flex items-center justify-center w-7 h-7 rounded-full border-2 border-background bg-gradient-to-br from-emerald-500 to-teal-500 text-[10px] font-bold text-white hover:scale-110 transition-all cursor-help shadow-md">
                                       {spec.name.charAt(0).toUpperCase()}
                                     </div>
                                   </TooltipTrigger>
@@ -951,9 +988,9 @@ const Index = () => {
                                   </TooltipContent>
                                 </Tooltip>
                               ))}
-                              {team.specialists.length > 3 && (
-                                <div className="inline-flex items-center justify-center w-6 h-6 rounded-full border-2 border-background bg-muted text-[9px] font-bold text-muted-foreground">
-                                  +{team.specialists.length - 3}
+                              {team.employees.length > 3 && (
+                                <div className="inline-flex items-center justify-center w-7 h-7 rounded-full border-2 border-background bg-gradient-to-br from-cyan-500 to-blue-500 text-[9px] font-bold text-white shadow-md">
+                                  +{team.employees.length - 3}
                                 </div>
                               )}
                             </TooltipProvider>
@@ -974,35 +1011,35 @@ const Index = () => {
             </motion.div>
           )}
 
-          {activeTab === 'specialists' && (
+          {activeTab === 'employees' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-foreground">Team Roles</h2>
+                <h2 className="text-2xl font-bold text-foreground">My Employees</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                {specialists.map(spec => (
-                  <div key={spec.id} className="glass-card p-6 border border-border hover:border-primary/50 transition-all relative group">
-                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                {Array.isArray(employees) && employees.map(spec => (
+                  <div key={spec.id} className="glass-card p-5 border-2 border-transparent hover:border-gradient transition-all duration-300 relative group bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-cyan-500/10 hover:from-emerald-500/15 hover:via-teal-500/15 hover:to-cyan-500/15 shadow-lg hover:shadow-2xl hover:shadow-emerald-500/20 rounded-xl">
+                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-1">
                       <button
-                        onClick={() => deleteSpecialist(spec.id)}
-                        className="p-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
-                        title="Delete role"
+                        onClick={() => deleteEmployee(spec.id)}
+                        className="p-2 rounded-lg bg-gradient-to-br from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                        title="Delete employee"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-primary/10">
-                        <Cpu className="w-4 h-4 text-primary" />
+                    <div className="flex flex-col items-center gap-3 mb-3">
+                      <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/30 to-teal-500/30 shadow-lg">
+                        <Cpu className="w-6 h-6 text-emerald-200" />
                       </div>
-                      <h3 className="text-xl font-semibold text-foreground">{capitalize(spec.name)}</h3>
+                      <h3 className="text-lg font-bold text-center bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 bg-clip-text text-transparent group-hover:from-emerald-300 group-hover:via-teal-300 group-hover:to-cyan-300 transition-all">{capitalize(spec.name)}</h3>
                     </div>
-                    <p className="text-base text-muted-foreground mb-4 h-12 line-clamp-2">{spec.description}</p>
-                    <div className="flex flex-wrap gap-1.5 pt-4 border-t border-border/50">
+                    <p className="text-sm text-gray-200 text-center mb-4 h-12 line-clamp-2 leading-relaxed">{spec.description}</p>
+                    <div className="flex flex-wrap gap-1.5 pt-3 border-t-2 border-gradient justify-center">
                       {(() => {
                         try {
                           return (JSON.parse(spec.tools || '[]')).map((tool: string) => (
-                            <span key={tool} className="text-[9px] px-2 py-0.5 rounded bg-secondary text-secondary-foreground border border-border uppercase font-bold">
+                            <span key={tool} className="text-[9px] px-2 py-1 rounded-full bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-200 border-2 border-cyan-400/30 uppercase font-bold hover:from-cyan-500/40 hover:to-blue-500/40 hover:border-cyan-400/50 transition-all hover:scale-105 shadow-sm">
                               {tool.replace('_', ' ')}
                             </span>
                           ));
@@ -1013,7 +1050,7 @@ const Index = () => {
                     </div>
                   </div>
                 ))}
-                {specialists.length === 0 && <p className="text-muted-foreground">No roles defined yet. Click "Add Role" to get started.</p>}
+                {employees.length === 0 && <p className="text-muted-foreground">No employees hired yet. Click "Add Employee" to get started.</p>}
               </div>
             </motion.div>
           )}
@@ -1167,40 +1204,40 @@ const Index = () => {
         editingTeam={editingTeam}
       />
 
-      <AssignSpecialistsModal
-        team={teamAssigningSpecialists}
-        isOpen={!!teamAssigningSpecialists}
-        onClose={() => setTeamAssigningSpecialists(null)}
+      <AssignEmployeesModal
+        team={teamAssigningEmployees}
+        isOpen={!!teamAssigningEmployees}
+        onClose={() => setTeamAssigningEmployees(null)}
         onSuccess={() => {
           const token = localStorage.getItem('token');
           if (token) fetchTeams(token);
         }}
       />
 
-      <SpecialistTemplatesModal
-        isOpen={isSpecialistTemplatesOpen}
-        onClose={() => setIsSpecialistTemplatesOpen(false)}
+      <EmployeeTemplatesModal
+        isOpen={isEmployeeTemplatesOpen}
+        onClose={() => setIsEmployeeTemplatesOpen(false)}
         onSelectTemplate={(template) => {
           setSelectedTemplate(template);
-          setIsSpecialistTemplatesOpen(false);
-          setIsCreateSpecialistOpen(true);
+          setIsEmployeeTemplatesOpen(false);
+          setIsCreateEmployeeOpen(true);
         }}
         onCreateFromScratch={() => {
           setSelectedTemplate(null);
-          setIsSpecialistTemplatesOpen(false);
-          setIsCreateSpecialistOpen(true);
+          setIsEmployeeTemplatesOpen(false);
+          setIsCreateEmployeeOpen(true);
         }}
       />
 
-      <CreateSpecialistModal
-        isOpen={isCreateSpecialistOpen}
+      <CreateEmployeeModal
+        isOpen={isCreateEmployeeOpen}
         onClose={() => {
-          setIsCreateSpecialistOpen(false);
+          setIsCreateEmployeeOpen(false);
           setSelectedTemplate(null);
         }}
         onSuccess={() => {
           const token = localStorage.getItem('token');
-          if (token) fetchSpecialists(token);
+          if (token) fetchEmployees(token);
           setSelectedTemplate(null);
         }}
         template={selectedTemplate}
@@ -1269,7 +1306,7 @@ const Index = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!specialistToDelete} onOpenChange={(open) => !open && setSpecialistToDelete(null)}>
+      <AlertDialog open={!!employeeToDelete} onOpenChange={(open) => !open && setEmployeeToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Team Role?</AlertDialogTitle>
@@ -1279,7 +1316,7 @@ const Index = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDeleteSpecialist} className="bg-destructive hover:bg-destructive/90">
+            <AlertDialogAction onClick={handleConfirmDeleteEmployee} className="bg-destructive hover:bg-destructive/90">
               Delete Role
             </AlertDialogAction>
           </AlertDialogFooter>

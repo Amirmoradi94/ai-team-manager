@@ -21,7 +21,7 @@ const validateCreateTask = [
   body('description')
     .optional()
     .trim()
-    .isLength({ max: 2000 }).withMessage('Description must not exceed 2000 characters'),
+    .isLength({ max: 20000 }).withMessage('Description must not exceed 20000 characters'),
   body('status')
     .optional()
     .isIn(['backlog', 'todo', 'in-progress', 'for-review', 'done']).withMessage('Invalid status'),
@@ -67,7 +67,7 @@ const validateUpdateTask = [
   body('description')
     .optional()
     .trim()
-    .isLength({ max: 2000 }).withMessage('Description must not exceed 2000 characters'),
+    .isLength({ max: 20000 }).withMessage('Description must not exceed 20000 characters'),
   body('status')
     .optional()
     .isIn(['backlog', 'todo', 'in-progress', 'for-review', 'done']).withMessage('Invalid status'),

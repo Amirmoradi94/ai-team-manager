@@ -1,0 +1,1 @@
+Trigger Moment → Share Action → Convert Referred → Reward → (Loop)

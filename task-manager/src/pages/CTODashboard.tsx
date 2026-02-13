@@ -122,6 +122,12 @@ export function CTODashboard() {
         setActiveTasks(data);
       }
 
+      // Force refresh resource status on open
+      await fetch(`${API_URL}/cto/refresh-resources`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
       // Fetch real resource status from server
       const resourceRes = await fetch(`${API_URL}/cto/resource-status`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -578,97 +584,57 @@ export function CTODashboard() {
                 Resource Health
               </h3>
               
-              <div className="space-y-6">
+              <div className="space-y-0 rounded-2xl border border-border/80 overflow-hidden divide-y divide-border/80">
                 {resources ? (
                   Object.entries(resources).map(([provider, status]) => {
                     const health = getResourceHealth(provider as keyof ResourceStatus);
                     if (health === 'disabled') return null;
 
-                    const plans: any = {
-                      claude: { pro: 45, max5x: 225, max20x: 900 },
-                      gemini: { pro: 100, ultra: 500 },
-                      codex: { plus: 90, pro: 900 }
-                    };
-                    const planName = config.subscriptions[provider as keyof typeof config.subscriptions]?.plan || 'pro';
-                    const max = plans[provider]?.[planName] || 100;
+                    return (
+                      <div key={provider} className="p-3 px-5 bg-secondary/5 hover:bg-secondary/10 transition-colors border-border/80">
+                        <div className="flex justify-between items-center">
+                          <div className="flex flex-col">
+                            <span className="capitalize font-bold text-base leading-tight">{provider}</span>
+                            {!status.available && status.reason && (
+                              <span className={`text-[10px] font-bold uppercase tracking-tighter ${status.needsAuth ? 'text-orange-500' : 'text-destructive'}`}>
+                                {status.reason}
+                              </span>
+                            )}
+                          </div>
 
-                                                          return (
-
-                                                            <div key={provider} className="space-y-3">
-
-                                                              <div className="flex justify-between items-end">
-
-                                                                <div className="flex flex-col">
-                                                                  <span className="capitalize font-bold text-base">{provider}</span>
-                                                                  {!status.available && status.reason && (
-                                                                    <span className={`text-[10px] font-bold uppercase tracking-tighter ${status.needsAuth ? 'text-orange-500' : 'text-destructive'}`}>
-                                                                      {status.reason}
-                                                                    </span>
-                                                                  )}
-                                                                </div>
-
-                                                                                                  <div className="flex items-center gap-2">
-                                    {status.needsAuth ? (
-                                      <button
-                                        onClick={async () => {
-                                          try {
-                                            const token = localStorage.getItem('token');
-                                            await fetch(`${API_URL}/runner/open-terminal`, {
-                                              method: 'POST',
-                                              headers: { 
-                                                'Authorization': `Bearer ${token}`,
-                                                'Content-Type': 'application/json'
-                                              },
-                                              body: JSON.stringify({ command: provider })
-                                            });
-                                            toast.success(`Opening terminal for ${provider} login...`);
-                                          } catch (e) {
-                                            toast.error('Failed to trigger terminal');
-                                          }
-                                        }}
-                                        className="px-4 py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 text-xs font-bold border border-orange-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm"
-                                      >
-                                        Enable
-                                      </button>
-                                    ) : (
-                                      <span className={`text-sm font-bold px-3 py-1 rounded-full ${
-                                        !status.available ? 'bg-destructive/10 text-destructive' :
-                                        health === 'healthy' ? 'bg-green-500/10 text-green-500' :
-                                        health === 'warning' ? 'bg-yellow-500/10 text-yellow-500' :
-                                        'bg-red-500/10 text-red-500'
-                                      }`}>
-                                        {!status.available ? 'Restricted' : `${Math.round((1 - (status.remaining5h / max)) * 100)}% Used`}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                                                                                </div>
-
-                                                                                                <div className="h-3 w-full bg-secondary rounded-full overflow-hidden">
-
-                                                                                                  <div 
-
-                                                                                                    className={`h-full rounded-full transition-all duration-500 ${
-
-                                                                                                      status.needsAuth ? 'bg-orange-500' :
-
-                                                                                                      !status.available ? 'bg-destructive' :
-
-                                                                                                      health === 'healthy' ? 'bg-green-500' :
-
-                                                                                                      health === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
-
-                                                                                                    }`}
-
-                                                                                                    style={{ width: `${(status.needsAuth || !status.available) ? 100 : Math.min(100, (1 - (status.remaining5h / max)) * 100)}%` }}
-
-                                                                                                  />
-
-                                                                                                </div>
-
-                                                            </div>
-
-                                                          );                  })
+                          <div className="flex items-center gap-2">
+                            {status.needsAuth ? (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const token = localStorage.getItem('token');
+                                    await fetch(`${API_URL}/runner/open-terminal`, {
+                                      method: 'POST',
+                                      headers: { 
+                                        'Authorization': `Bearer ${token}`,
+                                        'Content-Type': 'application/json'
+                                      },
+                                      body: JSON.stringify({ command: provider })
+                                    });
+                                    toast.success(`Opening terminal for ${provider} login...`);
+                                  } catch (e) {
+                                    toast.error('Failed to trigger terminal');
+                                  }
+                                }}
+                                className="px-4 py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 text-xs font-bold border border-orange-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm"
+                              >
+                                Enable
+                              </button>
+                            ) : (
+                              <span className="text-xs font-bold px-3 py-1 rounded-full bg-green-500/10 text-green-500 border border-green-500/20 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Enabled
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );                  })
                 ) : (
                   <div className="text-center py-10 text-muted-foreground bg-secondary/10 rounded-2xl border border-dashed border-border">
                     <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />

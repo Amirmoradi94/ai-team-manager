@@ -35,6 +35,9 @@ export interface Task {
   project_name?: string;
   team_id?: string;
   team_name?: string;
+  parent_id?: string;
+  task_type?: string;
+  resource_metadata?: string;
   // Error tracking
   failed_at?: string;
 }

@@ -32,9 +32,8 @@
       "preferredModels": [
         "gemini-3-pro",
         "claude-opus-4.5",
-        "gpt-5.2",
         "claude-sonnet-4.5",
-        "gemini-2.0-flash"
+        "gpt-4o"
       ]
     },
     "subscriptions": {
@@ -43,7 +42,7 @@
       "codex":   { "plan": "plus" }
     },
     "thresholds": {
-      "splitComplexityScore": 45,
+      "splitComplexityScore": 30,
       "deferWindowUsagePercent": 90,
       "reserveBuffer": 5,
       "maxRetries": 2

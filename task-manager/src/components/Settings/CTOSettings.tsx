@@ -36,7 +36,7 @@ const DEFAULT_CONFIG: CTOConfig = {
   autonomyLevel: 'full',
   activeProviders: ['claude', 'gemini', 'codex'],
   models: {
-    preferredModels: ['gemini-3-pro', 'claude-opus-4.5', 'gpt-5.2', 'claude-sonnet-4.5', 'gemini-2.0-flash']
+    preferredModels: ['gemini-3-pro', 'claude-opus-4.5', 'gpt-5.2', 'claude-sonnet-4.5']
   },
   subscriptions: {
     claude: { plan: 'max5x' },
@@ -358,7 +358,6 @@ export function CTOSettings() {
                       <option value="gpt-5.2">GPT-5.2</option>
                     </optgroup>
                     <optgroup label="Fast Models">
-                      <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
                       <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
                     </optgroup>
                   </select>

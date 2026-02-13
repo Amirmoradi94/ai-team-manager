@@ -10,6 +10,7 @@
     "start": "node agent-runner.js",
     "connect": "node bin/agent-runner.js connect",
     "dev": "node agent-runner.js",
+    "sync-context": "node scripts/sync-context.js",
     "postinstall": "node scripts/check-dependencies.js && node scripts/setup-service.js",
     "preuninstall": "node scripts/remove-service.js"
   },
@@ -24,11 +25,25 @@
   ],
   "author": "Amir Moradi",
   "license": "MIT",
+  "files": [
+    "agent-runner.js",
+    "agent-executor.js",
+    "context-manager.js",
+    "bin/",
+    "scripts/",
+    "cto/",
+    "skills/",
+    "config.json",
+    "README.md"
+  ],
   "dependencies": {
     "commander": "^13.1.0",
+    "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
     "node-fetch": "^2.7.0",
-    "socket.io-client": "^4.8.3"
+    "openai": "^6.21.0",
+    "socket.io-client": "^4.8.3",
+    "sqlite3": "^5.1.7"
   }
 }

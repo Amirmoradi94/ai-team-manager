@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const fs = require('fs').promises;
 const path = require('path');
 const { promisify } = require('util');
@@ -280,8 +280,9 @@ When you (an AI agent) are assigned a task in this project:
     const mode = options.mode || 'cli';
     const taskId = options.taskId;
     const envVars = options.env || {};
+    const useIsolatedSession = provider === 'gemini' || provider === 'claude' || provider === 'codex' || provider === 'openai';
 
-    const modelInfo = model ? ` [${model}]` : '';
+    const modelInfo = model && provider !== 'gemini' ? ` [${model}]` : '';
     console.log(`[Executor] Starting task execution with ${provider}${modelInfo} (mode: ${mode}, taskId: ${taskId})`);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -295,20 +296,22 @@ When you (an AI agent) are assigned a task in this project:
       await fs.writeFile(promptFile, prompt);
       let providerCommand = '';
 
-      // Add --model flag if CTO specified a model
-      const modelFlag = model ? ` --model ${model}` : '';
+      // Add --model flag if CTO specified a model (never pass model to gemini/codex CLI)
+      const modelFlag = model && provider !== 'gemini' && provider !== 'codex' && provider !== 'openai'
+        ? ` --model ${model}`
+        : '';
 
       switch (provider) {
         case 'gemini':
-          providerCommand = `gemini --prompt "$(cat ${promptFile})"${modelFlag} --output-format stream-json --yolo`;
+          providerCommand = `gemini --yolo -p "$(cat ${promptFile})" --output-format stream-json`;
           break;
         case 'codex':
         case 'openai':
-          providerCommand = `codex -p "$(cat ${promptFile})"${modelFlag} --json`;
+          providerCommand = `codex --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"${modelFlag} --json`;
           break;
         case 'claude':
         default:
-          providerCommand = `unset ANTHROPIC_API_KEY && claude -p "$(cat ${promptFile})"${modelFlag} --permission-mode bypassPermissions --output-format stream-json --verbose`;
+          providerCommand = `claude -p --dangerously-skip-permissions${modelFlag} "$(cat ${promptFile})" --output-format stream-json`;
           break;
       }
 
@@ -324,11 +327,24 @@ When you (an AI agent) are assigned a task in this project:
       console.log(`[Executor] Launching ${provider} CLI in background...`);
       console.log(`[Executor] Working directory: ${workingDir}`);
       console.log(`[Executor] Output file: ${outputFile}`);
-      await execAsync(`bash ${wrapperScript} > /dev/null 2>&1 &`);
+      const child = spawn('bash', [wrapperScript], {
+        detached: useIsolatedSession,
+        stdio: 'ignore'
+      });
+      const childState = { exited: false };
+      child.on('exit', () => { childState.exited = true; });
+      child.unref();
       await this.sleep(500);
       console.log(`[Executor] Monitoring output file for results...`);
-      const result = await this.monitorOutputFile(outputFile, logFile, promptFile, taskId);
-      try { await fs.unlink(wrapperScript); await fs.unlink(promptFile); } catch (e) {}
+      let result;
+      try {
+        result = await this.monitorOutputFile(outputFile, logFile, promptFile, taskId, childState);
+      } finally {
+        if (useIsolatedSession) {
+          await this._terminateIsolatedSession(child);
+        }
+        try { await fs.unlink(wrapperScript); await fs.unlink(promptFile); } catch (e) {}
+      }
       return result;
     } catch (error) {
       console.error(`[Agent] Error executing task:`, error.message);
@@ -336,7 +352,74 @@ When you (an AI agent) are assigned a task in this project:
     }
   }
 
-  async monitorOutputFile(outputFile, logFile, promptFile, taskId) {
+  async runProviderHealthCheck(provider, prompt = 'hello') {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const sessionName = `health-${provider}-${timestamp}`;
+    const outputFile = path.join(this.logsDir, `${sessionName}-output.txt`);
+    const promptFile = path.join(this.logsDir, `${sessionName}-prompt.txt`);
+    const wrapperScript = path.join(this.logsDir, `${sessionName}-wrapper.sh`);
+    const useIsolatedSession = true;
+
+    try {
+      await fs.writeFile(promptFile, prompt);
+
+      let providerCommand = '';
+      switch (provider) {
+        case 'gemini':
+          providerCommand = `gemini --yolo -p "$(cat ${promptFile})" --output-format stream-json`;
+          break;
+        case 'codex':
+        case 'openai':
+          providerCommand = `codex --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})" --json`;
+          break;
+        case 'claude':
+        default:
+          providerCommand = `claude -p --dangerously-skip-permissions "$(cat ${promptFile})" --output-format stream-json`;
+          break;
+      }
+
+      const scriptContent = `#!/bin/bash\nset -e\n${providerCommand} > ${outputFile} 2>&1\nexit $?\n`;
+      await fs.writeFile(wrapperScript, scriptContent);
+      await fs.chmod(wrapperScript, '755');
+
+      const child = spawn('bash', [wrapperScript], {
+        detached: useIsolatedSession,
+        stdio: 'ignore'
+      });
+      const childState = { exited: false };
+      child.on('exit', () => { childState.exited = true; });
+      child.unref();
+
+      const timeoutMs = 15000;
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const stat = await fs.stat(outputFile);
+          if (stat.size > 0 && childState.exited) break;
+        } catch {}
+        if (childState.exited) break;
+        await this.sleep(300);
+      }
+
+      let output = '';
+      try {
+        output = await fs.readFile(outputFile, 'utf-8');
+      } catch {}
+
+      if (!childState.exited) {
+        await this._terminateIsolatedSession(child);
+      }
+
+      const trimmed = (output || '').trim();
+      const lower = trimmed.toLowerCase();
+      const ok = trimmed.length > 0 && !lower.includes('credit balance is too low') && !lower.includes('not authenticated');
+      return { ok, output: output.slice(0, 1000) };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  }
+
+  async monitorOutputFile(outputFile, logFile, promptFile, taskId, childState = null) {
     const maxWaitTime = 600000;
     const checkInterval = 2000;
     const inactivityThreshold = 45000; 
@@ -354,10 +437,10 @@ When you (an AI agent) are assigned a task in this project:
     while (Date.now() - startTime < maxWaitTime) {
       await this.sleep(checkInterval);
       try {
-        const stats = await fs.stat(outputFile);
-        const currentSize = stats.size;
+        await fs.stat(outputFile);
+        const fullContent = await fs.readFile(outputFile, 'utf-8');
+        const currentSize = fullContent.length;
         if (currentSize > lastSize) {
-          const fullContent = await fs.readFile(outputFile, 'utf-8');
           const newContent = fullContent.slice(lastSize);
           lastSize = currentSize;
           lastChangeTime = Date.now();
@@ -371,6 +454,8 @@ When you (an AI agent) are assigned a task in this project:
           for (const line of lines) {
             try {
               const event = JSON.parse(line);
+
+              // Handle Claude format
               if (event.type === 'system' && event.subtype === 'init') sessionId = event.session_id;
               if (event.type === 'assistant' && event.message?.content) {
                 for (const block of event.message.content) {
@@ -383,8 +468,29 @@ When you (an AI agent) are assigned a task in this project:
                 durationMs = event.duration_ms || null;
                 numTurns = event.num_turns || null;
               }
-            } catch (e) { if (line.trim()) textOutput += line + '\n'; }
+
+              // Handle Gemini delta format
+              if (event.delta && event.content) {
+                if (textOutput.length < 100) {
+                  console.log('[Executor] First Gemini delta:', event.content.substring(0, 200));
+                }
+                textOutput += event.content;
+              }
+
+              // Handle Gemini role-based format
+              if (event.role === 'assistant' && event.content && !event.delta) {
+                if (textOutput.length < 100) {
+                  console.log('[Executor] First Gemini message:', event.content.substring(0, 200));
+                }
+                textOutput += event.content;
+              }
+            } catch (e) {
+              // Preserve raw output lines (Gemini/Claude may emit non-JSON text)
+              textOutput += `${line}\n`;
+            }
           }
+        } else if (childState?.exited && Date.now() - lastChangeTime > checkInterval) {
+          break;
         } else if (Date.now() - lastChangeTime > inactivityThreshold && Date.now() - startTime > minRunTime) break;
       } catch (error) { if (error.code !== 'ENOENT') break; }
     }
@@ -395,7 +501,19 @@ When you (an AI agent) are assigned a task in this project:
     return { success: textOutput.trim().length > 5, output: textOutput.trim(), logFile, sessionId, tokens_used: numTurns, cost: costUsd, duration: durationMs, toolsUsed };
   }
 
-  async executeKanbanTask(task, history = [], identity = {}, specialists = [], project = {}, team = {}, allSpecialists = []) {
+  async _terminateIsolatedSession(child) {
+    if (!child || !child.pid) return;
+    try {
+      // Kill entire process group (detached session)
+      process.kill(-child.pid, 'SIGTERM');
+      await this.sleep(300);
+      process.kill(-child.pid, 'SIGKILL');
+    } catch (e) {
+      // Ignore if already exited
+    }
+  }
+
+  async executeKanbanTask(task, history = [], identity = {}, specialists = [], project = {}, team = {}, allSpecialists = [], options = {}) {
     // 1. Sync Project Context (lightweight, project-specific)
     const contextDir = await this.syncProjectContext(project, team);
 
@@ -417,10 +535,12 @@ When you (an AI agent) are assigned a task in this project:
     }
 
     // 3. Determine Provider
-    let provider = 'claude';
+    let provider = options.provider || 'claude';
+    let model = options.model || null;
     try {
       const config = typeof identity.model_config === 'string' ? JSON.parse(identity.model_config) : identity.model_config;
-      if (config?.provider) provider = config.provider;
+      if (!options.provider && config?.provider) provider = config.provider;
+      if (!options.model && config?.model) model = config.model;
     } catch (e) {}
 
     // 4. Fetch Arsenal Tools (Equipped capabilities)
@@ -543,7 +663,7 @@ This report will be shown to the project stakeholders, so make it clear, profess
 </instruction>
     `.trim();
 
-    return this.executeTask(prompt, { provider, mode: 'cli', taskId: task.id, workDir: project.repository_path || process.cwd(), env: arsenalEnv });
+    return this.executeTask(prompt, { provider, model, mode: 'cli', taskId: task.id, workDir: project.repository_path || process.cwd(), env: arsenalEnv });
   }
 
   sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }

@@ -1,6 +1,6 @@
 # Resource State
 
-> Last updated: 2026-02-13T12:22:02.153Z
+> Last updated: 2026-02-13T12:55:55.416Z
 
 ## Subscriptions
 
@@ -53,6 +53,36 @@
 | claude | 2026-02-13T10:22:42.599Z | 12 | xp8pb07w7 | false |
 | claude | 2026-02-13T10:33:58.490Z | 12 | xp8pb07w7 | false |
 | claude | 2026-02-13T10:44:51.153Z | 12 | plawcb0of | false |
+| gemini | 2026-02-13T12:28:47.957Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:28:57.713Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:29:07.494Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:29:17.412Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:29:27.310Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:29:38.500Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:29:47.357Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:29:57.742Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:30:07.310Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:30:17.114Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:30:27.150Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:30:37.466Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:30:47.480Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:30:57.191Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:31:07.129Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:31:17.180Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:31:27.109Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:31:38.893Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:31:47.160Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:31:57.245Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:32:07.182Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:32:17.180Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:32:27.117Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:32:37.129Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:32:47.394Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:32:57.341Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:33:07.149Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:33:17.267Z | 1 | cto-internal | true |
+| gemini | 2026-02-13T12:34:42.720Z | 1 | cto-internal | true |
+| claude | 2026-02-13T12:34:49.233Z | 12 | 14j8z8asy | false |
 
 ## Current Status
 
@@ -63,13 +93,13 @@
 - Window resets in: 0min
 
 ### gemini (ultra)
-- Available: false
-- 5h remaining: 0
-- Day remaining: 0
+- Available: true
+- 5h remaining: 100
+- Day remaining: 100
 - Window resets in: 0min
 
 ### codex (plus)
-- Available: false
-- 5h remaining: 0
-- Day remaining: 0
+- Available: true
+- 5h remaining: 100
+- Day remaining: 100
 - Window resets in: 0min

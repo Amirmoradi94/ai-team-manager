@@ -810,6 +810,15 @@ app.get('/api/tasks/:id', authenticateToken, async (req, res) => {
     };
 
     res.json(transformedTask);
+    contextSync.syncAfterTaskChange('updated', id, transformedTask).catch(err =>
+      logger.error('Context sync failed after task schedule:', err)
+    );
+    contextSync.syncAfterTaskChange('updated', id, transformedTask).catch(err =>
+      logger.error('Context sync failed after task update:', err)
+    );
+    contextSync.syncAfterTaskChange('created', id, transformedTask).catch(err =>
+      logger.error('Context sync failed after task create:', err)
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1024,6 +1033,12 @@ app.put('/api/tasks/:id/move', authenticateToken, async (req, res) => {
   try {
     await run('UPDATE tasks SET status = ? WHERE id = ?', [status, id]);
     res.json({ success: true });
+    contextSync.syncAfterTaskChange('deleted', taskId).catch(err =>
+      logger.error('Context sync failed after task delete:', err)
+    );
+    contextSync.syncAfterTaskChange('updated', id).catch(err =>
+      logger.error('Context sync failed after task move:', err)
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1241,6 +1256,20 @@ app.patch('/api/users/:id', authenticateToken, async (req, res) => {
 
 // --- CTO INTELLIGENCE ROUTES ---
 
+function mapCtoProviderToTeamLeadConfig(ctoProvider) {
+  const providerValue = String(ctoProvider || '').toLowerCase();
+  if (providerValue.includes('claude')) {
+    return { provider: 'claude', model: 'claude-sonnet-4.5' };
+  }
+  if (providerValue.includes('gemini')) {
+    return { provider: 'gemini' };
+  }
+  if (providerValue.includes('codex') || providerValue.includes('openai')) {
+    return { provider: 'codex' };
+  }
+  return { provider: 'auto' };
+}
+
 // Get CTO configuration
 app.get('/api/cto/config', authenticateToken, async (req, res) => {
   try {
@@ -1311,6 +1340,13 @@ app.put('/api/cto/config', authenticateToken, requireAdmin, async (req, res) => 
       'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP',
       ['cto_config', value, value]
     );
+
+    const teamLeadConfig = mapCtoProviderToTeamLeadConfig(req.body?.ctoProvider);
+    await run(
+      'UPDATE users SET model_config = ? WHERE is_team_lead = 1',
+      [JSON.stringify(teamLeadConfig)]
+    );
+
     res.json({ success: true, config: req.body });
   } catch (err) {
     logger.error('Failed to update CTO settings:', err);
@@ -1719,6 +1755,9 @@ app.post('/api/projects/:id/teams/:teamId', authenticateToken, async (req, res) 
     );
 
     res.json({ success: true, message: 'Team assigned to project' });
+    contextSync.syncAfterProjectChange('updated', id).catch(err =>
+      logger.error('Context sync failed after project team assign:', err)
+    );
   } catch (err) {
     logger.error('Failed to assign team to project:', err);
     res.status(500).json({ error: err.message });
@@ -1736,6 +1775,9 @@ app.delete('/api/projects/:id/teams/:teamId', authenticateToken, async (req, res
     );
 
     res.json({ success: true, message: 'Team removed from project' });
+    contextSync.syncAfterProjectChange('updated', id).catch(err =>
+      logger.error('Context sync failed after project team removal:', err)
+    );
   } catch (err) {
     logger.error('Failed to remove team from project:', err);
     res.status(500).json({ error: err.message });

@@ -303,15 +303,15 @@ When you (an AI agent) are assigned a task in this project:
 
       switch (provider) {
         case 'gemini':
-          providerCommand = `gemini --yolo -p "$(cat ${promptFile})" --output-format stream-json`;
+          providerCommand = `gemini --yolo -p "$(cat ${promptFile})"`;
           break;
         case 'codex':
         case 'openai':
-          providerCommand = `codex --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"${modelFlag} --json`;
+          providerCommand = `codex -p --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"${modelFlag}`;
           break;
         case 'claude':
         default:
-          providerCommand = `claude -p --dangerously-skip-permissions${modelFlag} "$(cat ${promptFile})" --output-format stream-json`;
+          providerCommand = `claude -p "$(cat ${promptFile})" --dangerously-skip-permissions${modelFlag}`;
           break;
       }
 
@@ -366,15 +366,15 @@ When you (an AI agent) are assigned a task in this project:
       let providerCommand = '';
       switch (provider) {
         case 'gemini':
-          providerCommand = `gemini --yolo -p "$(cat ${promptFile})" --output-format stream-json`;
+          providerCommand = `gemini --yolo -p "$(cat ${promptFile})"`;
           break;
         case 'codex':
         case 'openai':
-          providerCommand = `codex --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})" --json`;
+          providerCommand = `codex -p --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"`;
           break;
         case 'claude':
         default:
-          providerCommand = `claude -p --dangerously-skip-permissions "$(cat ${promptFile})" --output-format stream-json`;
+          providerCommand = `claude -p "$(cat ${promptFile})" --dangerously-skip-permissions`;
           break;
       }
 

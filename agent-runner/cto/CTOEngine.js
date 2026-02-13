@@ -248,10 +248,11 @@ class CTOEngine {
 
       if (aiAnalysis) {
         // Enforce strict delegation: Only assign to Team Lead
-        const teamLeadId = payload.team?.lead?.id;
+        const teamLeadId = payload?.team?.lead?.id;
+        const action = typeof aiAnalysis.action === 'string' ? aiAnalysis.action.toLowerCase() : 'assign';
         
         // Decision Logic
-        if (aiAnalysis.action.toLowerCase() === 'split') {
+        if (action === 'split') {
            const decision = {
             action: 'split',
             reason: aiAnalysis.reasoning,
@@ -264,7 +265,7 @@ class CTOEngine {
           return decision;
         }
 
-        if (aiAnalysis.action.toLowerCase() === 'defer') {
+        if (action === 'defer') {
            const decision = {
             action: 'defer',
             reason: aiAnalysis.reasoning,

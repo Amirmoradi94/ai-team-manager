@@ -27,13 +27,13 @@
   "cto": {
     "enabled": true,
     "useAIForDecisions": true,
-    "ctoProvider": "gemini-3-pro",
+    "ctoProvider": "gemini-3-pro-preview",
     "models": {
       "preferredModels": [
-        "gemini-3-pro",
-        "claude-opus-4.5",
-        "claude-sonnet-4.5",
-        "gpt-4o"
+        "gemini-3-pro-preview",
+        "claude-opus-4-5-20251101",
+        "claude-sonnet-4-5-20250929",
+        "gpt-5.2"
       ]
     },
     "subscriptions": {

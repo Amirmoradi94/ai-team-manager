@@ -1,0 +1,2 @@
+eddiebe147/claude-settings@business
+nicepkg/ai-workflow@social-media

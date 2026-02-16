@@ -6,6 +6,7 @@
 ## Team Roles
 - **Market Research Analyst**: See `~/team_lead/roles/market_research_analyst.md`
 - **UI/UX Designer**: See `~/team_lead/roles/ui_ux_designer.md`
+- **Legal & Compliance Employee**: See `~/team_lead/roles/legal_compliance_employee.md`
 - **SEO Specialist**: See `~/team_lead/roles/seo_specialist.md`
 - **Financial Analyst**: See `~/team_lead/roles/financial_analyst.md`
 

@@ -4,6 +4,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const path = require('path');
+const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const compression = require('compression');
@@ -108,6 +109,57 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+const EMPLOYEE_MODEL_TIERS = {
+  high: {
+    claude: 'claude-sonnet-4-5-20250929',
+    gemini: 'gemini-3-flash-preview',
+    openai: 'gpt-5.2'
+  },
+  medium: {
+    claude: 'claude-sonnet-4-5-20250929',
+    gemini: 'gemini-3-flash-preview',
+    openai: 'gpt-5.2'
+  },
+  low: {
+    claude: 'claude-haiku-4-5-20251001',
+    gemini: 'gemini-3-flash-preview',
+    openai: 'gpt-5-mini'
+  }
+};
+
+function mapTierToModels(tier) {
+  const key = String(tier || 'medium').toLowerCase();
+  return EMPLOYEE_MODEL_TIERS[key] || EMPLOYEE_MODEL_TIERS.medium;
+}
+
+async function determineEmployeeTier(name, description) {
+  if (!process.env.OPENAI_API_KEY) return 'medium';
+  try {
+    const OpenAI = require('openai');
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await openai.chat.completions.create({
+      model: 'gpt-5-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are assigning AI model tiers to employees. Choose the best tier based on role complexity and impact.\nReturn JSON only: {\"tier\": \"high\" | \"medium\" | \"low\", \"reason\": \"short\"}`
+        },
+        {
+          role: 'user',
+          content: `Employee: ${name}\nDescription: ${description || 'No description'}`
+        }
+      ],
+      temperature: 0.2,
+      response_format: { type: 'json_object' }
+    });
+    const parsed = JSON.parse(response.choices[0].message.content.trim());
+    return parsed?.tier || 'medium';
+  } catch (err) {
+    logger.warn('Employee tier assignment failed, defaulting to medium:', err.message);
+    return 'medium';
+  }
+}
+
 // Rate Limiting
 const generalLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
@@ -183,6 +235,34 @@ db.serialize(() => {
     FOREIGN KEY(user_id) REFERENCES users(id)
   )`);
 
+  // Create AI usage events table
+  db.run(`CREATE TABLE IF NOT EXISTS ai_usage_events (
+    id TEXT PRIMARY KEY,
+    task_id TEXT,
+    project_id TEXT,
+    team_id TEXT,
+    actor_type TEXT, -- 'cto' | 'team_lead' | 'subagent'
+    provider TEXT,
+    model TEXT,
+    total_cost_usd REAL,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_creation_input_tokens INTEGER,
+    cache_read_input_tokens INTEGER,
+    web_search_requests INTEGER,
+    service_tier TEXT,
+    message_id TEXT,
+    step_id TEXT,
+    usage_raw TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL
+  )`);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_ai_usage_events_task ON ai_usage_events(task_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_ai_usage_events_project ON ai_usage_events(project_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_ai_usage_events_team ON ai_usage_events(team_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_ai_usage_events_created_at ON ai_usage_events(created_at)`);
+
   // Add created_by column if it doesn't exist (for existing databases)
   db.run(`ALTER TABLE tasks ADD COLUMN created_by TEXT`, () => {});
 
@@ -229,14 +309,32 @@ db.run(`ALTER TABLE users ADD COLUMN cto_resource_status TEXT`, () => {}); // JS
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
 
-  // Create employees table (Sub-Agents)
+  // Create employees table (stored as specialists in DB)
   db.run(`CREATE TABLE IF NOT EXISTS specialists (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
     system_prompt TEXT,
     tools TEXT, -- JSON string of allowed tools
+    model_claude TEXT,
+    model_gemini TEXT,
+    model_openai TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Add model fields to employees if they don't exist (for existing databases)
+  db.run(`ALTER TABLE specialists ADD COLUMN model_claude TEXT`, () => {});
+  db.run(`ALTER TABLE specialists ADD COLUMN model_gemini TEXT`, () => {});
+  db.run(`ALTER TABLE specialists ADD COLUMN model_openai TEXT`, () => {});
+
+  // Skills pool table (synced from agent-runner/skills)
+  db.run(`CREATE TABLE IF NOT EXISTS skills (
+    id TEXT PRIMARY KEY,
+    label TEXT,
+    category TEXT,
+    description TEXT,
+    source_path TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
   // --- NEW TEAM ARCHITECTURE ---
@@ -1113,6 +1211,10 @@ app.delete('/api/tasks/:id', authenticateToken, validateTaskId, async (req, res)
       });
     }
 
+    contextSync.syncAfterTaskChange('deleted', taskId).catch(err =>
+      logger.error('Context sync failed after task delete:', err)
+    );
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1259,16 +1361,40 @@ app.patch('/api/users/:id', authenticateToken, async (req, res) => {
 function mapCtoProviderToTeamLeadConfig(ctoProvider) {
   const providerValue = String(ctoProvider || '').toLowerCase();
   if (providerValue.includes('claude')) {
-    return { provider: 'claude', model: 'claude-sonnet-4.5' };
+    return { provider: 'claude', model: 'claude-sonnet-4-5-20250929', thinking: { enabled: true, budget_tokens: 4000 } };
   }
   if (providerValue.includes('gemini')) {
-    return { provider: 'gemini' };
+    return { provider: 'gemini', model: 'gemini-3-pro-preview' };
   }
   if (providerValue.includes('codex') || providerValue.includes('openai')) {
-    return { provider: 'codex' };
+    return { provider: 'openai_sdk', model: 'gpt-5.2' };
   }
   return { provider: 'auto' };
 }
+
+function ensureCtoProactiveFiles() {
+  const ctoRoot = path.resolve(__dirname, '..', '..', 'mycompany', 'cto');
+  const assetsRoot = path.resolve(__dirname, '..', '..', 'agent-runner', 'cto', 'proactive-assets');
+  const memoryDir = path.join(ctoRoot, 'memory');
+  if (!fs.existsSync(ctoRoot)) fs.mkdirSync(ctoRoot, { recursive: true });
+  if (!fs.existsSync(memoryDir)) fs.mkdirSync(memoryDir, { recursive: true });
+  const files = ['AGENTS.md', 'HEARTBEAT.md', 'MEMORY.md', 'ONBOARDING.md', 'SOUL.md', 'TOOLS.md', 'USER.md'];
+  for (const file of files) {
+    const dest = path.join(ctoRoot, file);
+    if (!fs.existsSync(dest)) {
+      const src = path.join(assetsRoot, file);
+      if (fs.existsSync(src)) fs.copyFileSync(src, dest);
+      else fs.writeFileSync(dest, `# ${file}\n\n`);
+    }
+  }
+  const sessionState = path.join(ctoRoot, 'SESSION-STATE.md');
+  if (!fs.existsSync(sessionState)) fs.writeFileSync(sessionState, '# SESSION-STATE.md\n\n**Status:** ACTIVE\n\n');
+  const workingBuffer = path.join(memoryDir, 'working-buffer.md');
+  if (!fs.existsSync(workingBuffer)) {
+    fs.writeFileSync(workingBuffer, `# Working Buffer (Danger Zone Log)\n**Status:** ACTIVE\n**Started:** ${new Date().toISOString()}\n\n---\n`);
+  }
+}
+
 
 // Get CTO configuration
 app.get('/api/cto/config', authenticateToken, async (req, res) => {
@@ -1277,9 +1403,17 @@ app.get('/api/cto/config', authenticateToken, async (req, res) => {
     const defaultConfig = {
       enabled: true,
       useAIForDecisions: true,
-      ctoProvider: 'gemini-3-pro',
+      ctoProvider: 'gemini-3-pro-preview',
+      ctoProviderMode: 'claude_api',
+      ctoModel: 'claude-opus-4-5-20251101',
+      teamLeadExecutionMode: 'claude_sdk',
       strategy: 'balanced',
       autonomyLevel: 'full',
+      costBudgets: {
+        perTaskUsd: 2.5,
+        perTeamDailyUsd: 25,
+        perProjectWeeklyUsd: 120
+      },
       activeProviders: ['claude', 'gemini', 'codex'],
       subscriptions: {
         claude: { plan: 'max5x' },
@@ -1351,6 +1485,207 @@ app.put('/api/cto/config', authenticateToken, requireAdmin, async (req, res) => 
   } catch (err) {
     logger.error('Failed to update CTO settings:', err);
     res.status(500).json({ error: 'Failed to update CTO settings' });
+  }
+});
+
+
+// ===== AI Usage Tracking =====
+app.post('/api/usage/events', authenticateToken, async (req, res) => {
+  try {
+    const events = Array.isArray(req.body?.events) ? req.body.events : [req.body];
+    if (!events || events.length === 0) {
+      return res.status(400).json({ error: 'No usage events provided' });
+    }
+
+    const stmt = db.prepare(`INSERT OR REPLACE INTO ai_usage_events (
+      id, task_id, project_id, team_id, actor_type, provider, model,
+      total_cost_usd, input_tokens, output_tokens, cache_creation_input_tokens,
+      cache_read_input_tokens, web_search_requests, service_tier,
+      message_id, step_id, usage_raw
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+    for (const event of events) {
+      if (!event?.id) continue;
+      stmt.run(
+        event.id,
+        event.task_id || null,
+        event.project_id || null,
+        event.team_id || null,
+        event.actor_type || null,
+        event.provider || null,
+        event.model || null,
+        typeof event.total_cost_usd === 'number' ? event.total_cost_usd : null,
+        Number.isFinite(event.input_tokens) ? event.input_tokens : null,
+        Number.isFinite(event.output_tokens) ? event.output_tokens : null,
+        Number.isFinite(event.cache_creation_input_tokens) ? event.cache_creation_input_tokens : null,
+        Number.isFinite(event.cache_read_input_tokens) ? event.cache_read_input_tokens : null,
+        Number.isFinite(event.web_search_requests) ? event.web_search_requests : null,
+        event.service_tier || null,
+        event.message_id || null,
+        event.step_id || null,
+        event.usage_raw ? JSON.stringify(event.usage_raw) : null
+      );
+    }
+
+    stmt.finalize();
+    res.json({ success: true, count: events.length });
+  } catch (err) {
+    logger.error('Failed to record usage events:', err);
+    res.status(500).json({ error: 'Failed to record usage events' });
+  }
+});
+
+app.get('/api/usage/summary', authenticateToken, async (req, res) => {
+  try {
+    const hours = Number(req.query.hours || 24);
+    const projectId = req.query.project_id || null;
+    const teamId = req.query.team_id || null;
+    const taskId = req.query.task_id || null;
+    const provider = req.query.provider || null;
+
+    const filters = [];
+    const params = [];
+    if (Number.isFinite(hours)) {
+      filters.push(`created_at >= datetime('now', ?)`);
+      params.push(`-${hours} hours`);
+    }
+    if (projectId) {
+      filters.push(`project_id = ?`);
+      params.push(projectId);
+    }
+    if (teamId) {
+      filters.push(`team_id = ?`);
+      params.push(teamId);
+    }
+    if (taskId) {
+      filters.push(`task_id = ?`);
+      params.push(taskId);
+    }
+    if (provider) {
+      filters.push(`provider = ?`);
+      params.push(provider);
+    }
+
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const rows = await all(
+      `SELECT provider, model, actor_type, total_cost_usd, input_tokens, output_tokens
+       FROM ai_usage_events ${where}`,
+      params
+    );
+
+    const summary = {
+      hours,
+      project_id: projectId,
+      team_id: teamId,
+      provider,
+      task_id: taskId,
+      total_cost_usd: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      by_provider: {},
+      by_model: {},
+      by_actor_type: {}
+    };
+
+    for (const row of rows) {
+      const cost = typeof row.total_cost_usd === 'number' ? row.total_cost_usd : 0;
+      const input = Number.isFinite(row.input_tokens) ? row.input_tokens : 0;
+      const output = Number.isFinite(row.output_tokens) ? row.output_tokens : 0;
+
+      summary.total_cost_usd += cost;
+      summary.total_input_tokens += input;
+      summary.total_output_tokens += output;
+
+      if (row.provider) {
+        summary.by_provider[row.provider] = summary.by_provider[row.provider] || {
+          total_cost_usd: 0,
+          total_input_tokens: 0,
+          total_output_tokens: 0
+        };
+        summary.by_provider[row.provider].total_cost_usd += cost;
+        summary.by_provider[row.provider].total_input_tokens += input;
+        summary.by_provider[row.provider].total_output_tokens += output;
+      }
+
+      if (row.model) {
+        summary.by_model[row.model] = summary.by_model[row.model] || {
+          total_cost_usd: 0,
+          total_input_tokens: 0,
+          total_output_tokens: 0
+        };
+        summary.by_model[row.model].total_cost_usd += cost;
+        summary.by_model[row.model].total_input_tokens += input;
+        summary.by_model[row.model].total_output_tokens += output;
+      }
+
+      if (row.actor_type) {
+        summary.by_actor_type[row.actor_type] = summary.by_actor_type[row.actor_type] || {
+          total_cost_usd: 0,
+          total_input_tokens: 0,
+          total_output_tokens: 0
+        };
+        summary.by_actor_type[row.actor_type].total_cost_usd += cost;
+        summary.by_actor_type[row.actor_type].total_input_tokens += input;
+        summary.by_actor_type[row.actor_type].total_output_tokens += output;
+      }
+    }
+
+    res.json(summary);
+  } catch (err) {
+    logger.error('Failed to fetch usage summary:', err);
+    res.status(500).json({ error: 'Failed to fetch usage summary' });
+  }
+});
+
+app.get('/api/usage/top-tasks', authenticateToken, async (req, res) => {
+  try {
+    const hours = Number(req.query.hours || 168);
+    const limit = Number(req.query.limit || 5);
+    const projectId = req.query.project_id || null;
+    const teamId = req.query.team_id || null;
+
+    const filters = [];
+    const params = [];
+    if (Number.isFinite(hours)) {
+      filters.push(`e.created_at >= datetime('now', ?)`);
+      params.push(`-${hours} hours`);
+    }
+    if (projectId) {
+      filters.push(`e.project_id = ?`);
+      params.push(projectId);
+    }
+    if (teamId) {
+      filters.push(`e.team_id = ?`);
+      params.push(teamId);
+    }
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    const rows = await all(
+      `SELECT 
+         e.task_id,
+         t.title,
+         t.status,
+         p.name AS project_name,
+         tm.name AS team_name,
+         SUM(COALESCE(e.total_cost_usd, 0)) AS total_cost_usd,
+         SUM(COALESCE(e.input_tokens, 0)) AS total_input_tokens,
+         SUM(COALESCE(e.output_tokens, 0)) AS total_output_tokens,
+         MAX(e.created_at) AS last_used_at
+       FROM ai_usage_events e
+       LEFT JOIN tasks t ON t.id = e.task_id
+       LEFT JOIN projects p ON p.id = e.project_id
+       LEFT JOIN teams tm ON tm.id = e.team_id
+       ${where}
+       GROUP BY e.task_id
+       ORDER BY total_cost_usd DESC
+       LIMIT ?`,
+      [...params, Number.isFinite(limit) ? limit : 5]
+    );
+
+    res.json({ hours, limit, rows });
+  } catch (err) {
+    logger.error('Failed to fetch top tasks by usage:', err);
+    res.status(500).json({ error: 'Failed to fetch top tasks' });
   }
 });
 
@@ -1921,7 +2256,7 @@ app.get('/api/runner/project', async (req, res) => {
       };
     }
     
-    // Get teams assigned to this project (many-to-many), enriched with their leads and specialists
+    // Get teams assigned to this project (many-to-many), enriched with their leads and employees
     let teams = [];
 
     if (project && project.id) {
@@ -1933,8 +2268,8 @@ app.get('/api/runner/project', async (req, res) => {
 
       teams = await Promise.all(projectTeams.map(async (t) => {
         const lead = await get('SELECT name, system_prompt, model_config FROM users WHERE team_id = ? AND is_team_lead = 1', [t.id]);
-        const teamSpecs = await all(`
-          SELECT s.name, s.description, s.system_prompt, s.tools
+        const teamEmployees = await all(`
+          SELECT s.id, s.name, s.description, s.system_prompt, s.tools, s.model_claude, s.model_gemini, s.model_openai
           FROM specialists s
           JOIN team_specialists ts ON s.id = ts.specialist_id
           WHERE ts.team_id = ?
@@ -1943,13 +2278,13 @@ app.get('/api/runner/project', async (req, res) => {
         return {
           ...t,
           lead: lead || { name: 'Lead Agent', system_prompt: 'Primary project orchestrator.' },
-          specialists: teamSpecs || []
+          employees: teamEmployees || []
         };
       }));
     }
 
-    // Fetch all global specialists for the global directory
-    const allSpecialists = await all('SELECT name, description, system_prompt, tools FROM specialists');
+    // Fetch all global employees for the global directory
+    const allEmployees = await all('SELECT id, name, description, system_prompt, tools, model_claude, model_gemini, model_openai FROM specialists');
 
     res.json({
       project,
@@ -1957,9 +2292,9 @@ app.get('/api/runner/project', async (req, res) => {
         name: 'General', 
         mission_statement: 'Global project execution.',
         lead: { name: 'Lead Agent', system_prompt: 'Primary project orchestrator.' },
-        specialists: []
+        employees: []
       }],
-      allSpecialists
+      allEmployees
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1996,7 +2331,7 @@ app.get('/api/runner/tasks', async (req, res) => {
         LEFT JOIN users c ON t.created_by = c.id
         LEFT JOIN teams tm ON t.team_id = tm.id
         WHERE t.project_id = ?
-        AND t.status IN ('backlog', 'todo')
+        AND t.status IN ('backlog', 'todo', 'blocked')
         ORDER BY t.created_at ASC
       `, [projectByToken.id]);
 
@@ -2072,7 +2407,7 @@ app.get('/api/runner/tasks', async (req, res) => {
       LEFT JOIN users c ON t.created_by = c.id
       LEFT JOIN teams tm ON t.team_id = tm.id
       WHERE t.project_id IN (${placeholders})
-      AND t.status IN ('backlog', 'todo')
+      AND t.status IN ('backlog', 'todo', 'blocked')
       ORDER BY t.created_at ASC
     `, projectIds);
 
@@ -2189,51 +2524,124 @@ app.get('/api/ai/test', (req, res) => {
 // Load comprehensive skills pool
 let SKILLS_POOL_CACHE = null;
 function getSkillsPool() {
-  if (!SKILLS_POOL_CACHE) {
-    try {
-      SKILLS_POOL_CACHE = require('./skills-pool.json');
-      logger.info(`Loaded ${SKILLS_POOL_CACHE.length} skills from pool`);
-    } catch (err) {
-      logger.error('Failed to load skills pool:', err);
-      SKILLS_POOL_CACHE = [];
-    }
-  }
-  return SKILLS_POOL_CACHE;
+  return SKILLS_POOL_CACHE || [];
 }
 
-app.post('/api/ai/analyze-skills', authenticateToken, async (req, res) => {
-  const { name, description } = req.body;
-  if (!description) return res.status(400).json({ error: 'Description is required' });
+function parseSkillFrontmatter(content) {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  const lines = match[1].split('\n');
+  const data = {};
+  for (const line of lines) {
+    const idx = line.indexOf(':');
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    data[key] = value;
+  }
+  return data;
+}
 
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(503).json({ error: 'AI not configured' });
+function walkSkillFiles(rootDir) {
+  const results = [];
+  const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkSkillFiles(fullPath));
+    } else if (entry.isFile() && entry.name.toLowerCase() === 'skill.md') {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
+
+async function syncSkillsFromAgentRunner() {
+  const skillsRoot = path.resolve(__dirname, '..', '..', 'agent-runner', 'skills');
+  if (!fs.existsSync(skillsRoot)) {
+    logger.warn('Skills sync skipped: agent-runner/skills not found');
+    return [];
   }
 
-  try {
-    const OpenAI = require('openai');
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const skillFiles = walkSkillFiles(skillsRoot);
+  const skills = [];
 
-    // Load comprehensive skills pool
-    const skillsPool = getSkillsPool();
+  for (const skillFile of skillFiles) {
+    try {
+      const content = fs.readFileSync(skillFile, 'utf-8');
+      const frontmatter = parseSkillFrontmatter(content);
+      const dirName = path.basename(path.dirname(skillFile));
+      const id = frontmatter.name || dirName;
+      const label = (frontmatter.title || frontmatter.name || dirName).replace(/[-_]/g, ' ');
+      const description = frontmatter.description || 'Skill from agent-runner pool.';
+      const category = path.basename(path.dirname(path.dirname(skillFile))) || 'General';
 
-    // Group skills by category for better organization
-    const skillsByCategory = skillsPool.reduce((acc, skill) => {
-      if (!acc[skill.category]) acc[skill.category] = [];
-      acc[skill.category].push(`${skill.id} (${skill.label})`);
-      return acc;
-    }, {});
+      skills.push({
+        id,
+        label,
+        category,
+        description,
+        source_path: skillFile
+      });
+    } catch (err) {
+      logger.warn(`Failed to read skill file ${skillFile}:`, err);
+    }
+  }
 
-    // Create comprehensive skill list for prompt
-    const skillsList = Object.entries(skillsByCategory)
-      .map(([category, skills]) => `${category}:\n- ${skills.join('\n- ')}`)
-      .join('\n\n');
+  const stmt = db.prepare(`INSERT OR REPLACE INTO skills (id, label, category, description, source_path, updated_at)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`);
+  for (const skill of skills) {
+    stmt.run(skill.id, skill.label, skill.category, skill.description, skill.source_path);
+  }
+  stmt.finalize();
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are a talent acquisition specialist. Analyze the employee class name and description and suggest the most relevant skills from the provided comprehensive pool of ${skillsPool.length} skills.
+  SKILLS_POOL_CACHE = skills;
+  logger.info(`Synced ${skills.length} skills from agent-runner pool`);
+  return skills;
+}
+
+async function getSkillsPoolFromDb() {
+  const rows = await all('SELECT id, label, category, description, source_path FROM skills ORDER BY id ASC');
+  return rows || [];
+}
+
+async function refreshSkillsPool() {
+  const dbSkills = await getSkillsPoolFromDb();
+  if (dbSkills.length > 0) {
+    SKILLS_POOL_CACHE = dbSkills;
+    return dbSkills;
+  }
+  return syncSkillsFromAgentRunner();
+}
+
+async function analyzeEmployeeSkillsWithOpenAI({ name, description }) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
+
+  const OpenAI = require('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  let skillsPool = getSkillsPool();
+  if (!skillsPool || skillsPool.length === 0) {
+    skillsPool = await refreshSkillsPool();
+  }
+
+  const skillsByCategory = skillsPool.reduce((acc, skill) => {
+    if (!acc[skill.category]) acc[skill.category] = [];
+    acc[skill.category].push(`${skill.id} (${skill.label})`);
+    return acc;
+  }, {});
+
+  const skillsList = Object.entries(skillsByCategory)
+    .map(([category, skills]) => `${category}:\n- ${skills.join('\n- ')}`)
+    .join('\n\n');
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are a talent acquisition specialist. Analyze the employee class name and description and suggest the most relevant skills from the provided comprehensive pool of ${skillsPool.length} skills.
 
 COMPLETE SKILLS POOL (590 skills from skills.sh registry):
 
@@ -2249,23 +2657,140 @@ Your task:
 Return a JSON object with a "skillIds" key containing an array of skill IDs (use exact IDs from above).
 
 Example format: {"skillIds": ["frontend-design", "react", "typescript"]}`
-        },
-        {
-          role: "user",
-          content: `Employee Name: ${name}\nDescription: ${description}`
-        }
-      ],
-      temperature: 0.3,
-      response_format: { type: "json_object" }
-    });
+      },
+      {
+        role: "user",
+        content: `Employee Name: ${name}\nDescription: ${description || 'No description provided'}`
+      }
+    ],
+    temperature: 0.3,
+    response_format: { type: "json_object" }
+  });
 
-    const result = JSON.parse(response.choices[0].message.content.trim());
-    res.json(result);
+  const result = JSON.parse(response.choices[0].message.content.trim());
+  return Array.isArray(result?.skillIds) ? result.skillIds : [];
+}
+
+async function autoAssignSkillsToEmployees({ force = false } = {}) {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      logger.warn('Auto-assign skills skipped: OPENAI_API_KEY not configured');
+      return;
+    }
+
+    const employees = await all('SELECT id, name, description, tools FROM specialists ORDER BY name ASC');
+    let updated = 0;
+
+    for (const employee of employees) {
+      let existingSkills = [];
+      try {
+        existingSkills = JSON.parse(employee.tools || '[]');
+      } catch (e) {
+        existingSkills = [];
+      }
+
+      if (!force && existingSkills.length > 0) continue;
+
+      const skillIds = await analyzeEmployeeSkillsWithOpenAI({
+        name: employee.name,
+        description: employee.description
+      });
+
+      if (skillIds.length === 0) continue;
+
+      await run('UPDATE specialists SET tools = ? WHERE id = ?', [
+        JSON.stringify(skillIds),
+        employee.id
+      ]);
+      updated += 1;
+    }
+
+    if (updated > 0) {
+      logger.info(`Auto-assigned skills for ${updated} employees`);
+      await contextSync.triggerFullSync();
+    }
+  } catch (err) {
+    logger.error('Auto-assign skills failed:', err);
+  }
+}
+
+app.post('/api/ai/analyze-skills', authenticateToken, async (req, res) => {
+  const { name, description } = req.body;
+  if (!description) return res.status(400).json({ error: 'Description is required' });
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'AI not configured' });
+  }
+
+  try {
+    const skillIds = await analyzeEmployeeSkillsWithOpenAI({ name, description });
+    res.json({ skillIds });
   } catch (err) {
     logger.error('Skill analysis failed:', err);
     res.status(500).json({ error: 'Skill analysis failed' });
   }
 });
+
+app.post('/api/ai/assign-skills-all', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { force = false } = req.body || {};
+    await autoAssignSkillsToEmployees({ force: Boolean(force) });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Assign skills all failed:', err);
+    res.status(500).json({ error: 'Assign skills failed' });
+  }
+});
+
+app.get('/api/skills', authenticateToken, async (req, res) => {
+  try {
+    let skills = await getSkillsPoolFromDb();
+    if (!skills || skills.length === 0) {
+      skills = await syncSkillsFromAgentRunner();
+    }
+    res.json(skills);
+  } catch (err) {
+    logger.error('Failed to fetch skills:', err);
+    res.status(500).json({ error: 'Failed to fetch skills' });
+  }
+});
+
+app.post('/api/skills/sync', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const skills = await syncSkillsFromAgentRunner();
+    res.json({ success: true, count: skills.length });
+  } catch (err) {
+    logger.error('Failed to sync skills:', err);
+    res.status(500).json({ error: 'Failed to sync skills' });
+  }
+});
+
+// Auto-assign skills on startup (non-blocking)
+setTimeout(() => {
+  autoAssignSkillsToEmployees({ force: false }).catch(err =>
+    logger.error('Startup auto-assign skills failed:', err)
+  );
+}, 2000);
+
+// Sync skills on startup and watch for changes
+setTimeout(() => {
+  refreshSkillsPool().catch(err => logger.error('Startup skills sync failed:', err));
+}, 1500);
+
+try {
+  const skillsWatchRoot = path.resolve(__dirname, '..', '..', 'agent-runner', 'skills');
+  if (fs.existsSync(skillsWatchRoot)) {
+    let syncTimer = null;
+    fs.watch(skillsWatchRoot, { recursive: true }, () => {
+      if (syncTimer) clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => {
+        refreshSkillsPool().catch(err => logger.error('Skills sync failed:', err));
+      }, 1200);
+    });
+  }
+} catch (err) {
+  logger.warn('Skills watch not supported:', err);
+}
 
 // AI-powered employee suggestions for team composition
 app.post('/api/ai/suggest-team-employees', authenticateToken, async (req, res) => {
@@ -2340,10 +2865,11 @@ Example format: {"employeeIds": ["abc123", "def456", "ghi789"]}`
 });
 
 app.post('/api/ai/recommendations', authenticateToken, async (req, res) => {
-  const { goal, specialists } = req.body;
+  const { goal, specialists, employees } = req.body;
   if (!goal) return res.status(400).json({ error: 'Goal is required' });
-  if (!specialists || !Array.isArray(specialists)) {
-    return res.status(400).json({ error: 'Specialists array is required' });
+  const employeeList = Array.isArray(employees) ? employees : specialists;
+  if (!employeeList || !Array.isArray(employeeList)) {
+    return res.status(400).json({ error: 'Employees array is required' });
   }
 
   if (!process.env.OPENAI_API_KEY) {
@@ -2357,24 +2883,24 @@ app.post('/api/ai/recommendations', authenticateToken, async (req, res) => {
     const OpenAI = require('openai');
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const specialistsList = specialists.map(s =>
+    const employeesList = employeeList.map(s =>
       `${s.id}: ${s.name} - ${s.description} (Category: ${s.category})`
     ).join('\n');
 
-    const systemPrompt = `You are an expert team composition strategist. Based on the user's goal, recommend the optimal specialists from the available list.
+    const systemPrompt = `You are an expert team composition strategist. Based on the user's goal, recommend the optimal employees from the available list.
 
-Analyze the goal and recommend 3-8 specialists that would work best together without role conflicts.
+Analyze the goal and recommend 3-8 employees that would work best together without role conflicts.
 
 Return ONLY a JSON object (no markdown, no code blocks) with this structure:
 {
-  "recommendedIds": ["specialist-id-1", "specialist-id-2", ...],
-  "reasoning": "Brief explanation of why these specialists work well together for this goal"
+  "recommendedIds": ["employee-id-1", "employee-id-2", ...],
+  "reasoning": "Brief explanation of why these employees work well together for this goal"
 }`;
 
     const userPrompt = `Goal: ${goal}
 
-Available Specialists:
-${specialistsList}
+Available Employees:
+${employeesList}
 
 Recommend the optimal team composition.`;
 
@@ -2450,7 +2976,8 @@ app.post('/api/teams', authenticateToken, async (req, res) => {
     project_id, 
     human_in_the_loop,
     lead, // { name, system_prompt, model_config }
-    specialist_ids // Array of strings
+    specialist_ids, // Array of strings (legacy)
+    employee_ids // Array of strings
   } = req.body;
 
   const teamId = Math.random().toString(36).substr(2, 9);
@@ -2482,16 +3009,17 @@ app.post('/api/teams', authenticateToken, async (req, res) => {
           'member', 
           1, // is_ai
           lead.system_prompt, 
-          JSON.stringify(lead.model_config || { provider: 'claude', model: 'sonnet' }),
+          JSON.stringify(lead.model_config || { provider: 'claude', model: 'claude-sonnet-4-5-20250929' }),
           teamId,
           1 // is_team_lead
         ]
       );
     }
 
-    // 3. Link Specialists
-    if (specialist_ids && Array.isArray(specialist_ids)) {
-      for (const specId of specialist_ids) {
+    // 3. Link Employees
+    const employeeIds = Array.isArray(employee_ids) ? employee_ids : specialist_ids;
+    if (employeeIds && Array.isArray(employeeIds)) {
+      for (const specId of employeeIds) {
         await run(
           'INSERT INTO team_specialists (team_id, specialist_id) VALUES (?, ?)',
           [teamId, specId]
@@ -2522,7 +3050,8 @@ app.put('/api/teams/:id', authenticateToken, async (req, res) => {
     mission_statement, 
     human_in_the_loop,
     lead, // { name, provider, system_prompt }
-    specialist_ids 
+    specialist_ids,
+    employee_ids
   } = req.body;
 
   try {
@@ -2547,22 +3076,28 @@ app.put('/api/teams/:id', authenticateToken, async (req, res) => {
         [
           lead.name,
           lead.system_prompt,
-          JSON.stringify({ provider: lead.provider || 'claude', model: 'sonnet' }),
+          JSON.stringify(lead.model_config || { provider: lead.provider || 'claude', model: 'claude-sonnet-4-5-20250929' }),
           id
         ]
       );
     }
 
-    // 3. Update Specialists (Unlink all, then Link new)
-    if (specialist_ids && Array.isArray(specialist_ids)) {
+    // 3. Update Employees (Unlink all, then Link new)
+    const employeeIds = Array.isArray(employee_ids) ? employee_ids : specialist_ids;
+    if (employeeIds && Array.isArray(employeeIds)) {
       await run('DELETE FROM team_specialists WHERE team_id = ?', [id]);
-      for (const specId of specialist_ids) {
+      for (const specId of employeeIds) {
         await run(
           'INSERT INTO team_specialists (team_id, specialist_id) VALUES (?, ?)',
           [id, specId]
         );
       }
     }
+
+    // Trigger context sync
+    contextSync.syncAfterTeamChange('updated', id).catch(err =>
+      logger.error('Context sync failed:', err)
+    );
 
     res.json({ success: true });
   } catch (err) {
@@ -2711,14 +3246,51 @@ app.get('/api/employees', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/api/employees/recompute-models', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const employees = await all('SELECT id, name, description FROM specialists ORDER BY name ASC');
+    let updated = 0;
+    for (const employee of employees) {
+      const tier = await determineEmployeeTier(employee.name, employee.description);
+      const models = mapTierToModels(tier);
+      await run(
+        'UPDATE specialists SET model_claude = ?, model_gemini = ?, model_openai = ? WHERE id = ?',
+        [models.claude, models.gemini, models.openai, employee.id]
+      );
+      updated += 1;
+    }
+
+    await contextSync.triggerFullSync();
+    res.json({ success: true, updated });
+  } catch (err) {
+    logger.error('Failed to recompute employee models:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/specialists', authenticateToken, async (req, res) => {
-  const { name, description, system_prompt, tools } = req.body;
+  const { name, description, system_prompt, tools, model_claude, model_gemini, model_openai } = req.body;
   const id = Math.random().toString(36).substr(2, 9);
 
   try {
+    let resolvedTools = Array.isArray(tools) ? tools : [];
+    if (resolvedTools.length === 0 && description && process.env.OPENAI_API_KEY) {
+      try {
+        resolvedTools = await analyzeEmployeeSkillsWithOpenAI({ name, description });
+      } catch (err) {
+        logger.warn('Auto skill assignment failed for new specialist:', err);
+      }
+    }
+    const tier = await determineEmployeeTier(name, description);
+    const models = mapTierToModels(tier);
+    const finalModels = {
+      model_claude: model_claude || models.claude,
+      model_gemini: model_gemini || models.gemini,
+      model_openai: model_openai || models.openai
+    };
     await run(
-      'INSERT INTO specialists (id, name, description, system_prompt, tools) VALUES (?, ?, ?, ?, ?)',
-      [id, name, description, system_prompt, JSON.stringify(tools || [])]
+      'INSERT INTO specialists (id, name, description, system_prompt, tools, model_claude, model_gemini, model_openai) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, name, description, system_prompt, JSON.stringify(resolvedTools), finalModels.model_claude, finalModels.model_gemini, finalModels.model_openai]
     );
     const specialist = await get('SELECT * FROM specialists WHERE id = ?', [id]);
     res.json(specialist);
@@ -2728,13 +3300,28 @@ app.post('/api/specialists', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/employees', authenticateToken, async (req, res) => {
-  const { name, description, system_prompt, tools } = req.body;
+  const { name, description, system_prompt, tools, model_claude, model_gemini, model_openai } = req.body;
   const id = Math.random().toString(36).substr(2, 9);
 
   try {
+    let resolvedTools = Array.isArray(tools) ? tools : [];
+    if (resolvedTools.length === 0 && description && process.env.OPENAI_API_KEY) {
+      try {
+        resolvedTools = await analyzeEmployeeSkillsWithOpenAI({ name, description });
+      } catch (err) {
+        logger.warn('Auto skill assignment failed for new employee:', err);
+      }
+    }
+    const tier = await determineEmployeeTier(name, description);
+    const models = mapTierToModels(tier);
+    const finalModels = {
+      model_claude: model_claude || models.claude,
+      model_gemini: model_gemini || models.gemini,
+      model_openai: model_openai || models.openai
+    };
     await run(
-      'INSERT INTO specialists (id, name, description, system_prompt, tools) VALUES (?, ?, ?, ?, ?)',
-      [id, name, description, system_prompt, JSON.stringify(tools || [])]
+      'INSERT INTO specialists (id, name, description, system_prompt, tools, model_claude, model_gemini, model_openai) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, name, description, system_prompt, JSON.stringify(resolvedTools), finalModels.model_claude, finalModels.model_gemini, finalModels.model_openai]
     );
     const specialist = await get('SELECT * FROM specialists WHERE id = ?', [id]);
 
@@ -2806,8 +3393,7 @@ app.post('/api/tools', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// Get tools equipped for a specialist
-app.get('/api/specialists/:id/tools', authenticateToken, async (req, res) => {
+const getEmployeeTools = async (req, res) => {
   try {
     const tools = await all(`
       SELECT t.*, st.config_values 
@@ -2819,10 +3405,9 @@ app.get('/api/specialists/:id/tools', authenticateToken, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
 
-// Equip a specialist with a tool (Resource Allocation)
-app.post('/api/specialists/:id/equip', authenticateToken, requireAdmin, async (req, res) => {
+const equipEmployeeTool = async (req, res) => {
   const { tool_id, config_values } = req.body;
   const specialist_id = req.params.id;
 
@@ -2831,11 +3416,16 @@ app.post('/api/specialists/:id/equip', authenticateToken, requireAdmin, async (r
       'INSERT INTO specialist_tools (specialist_id, tool_id, config_values) VALUES (?, ?, ?) ON CONFLICT(specialist_id, tool_id) DO UPDATE SET config_values = ?',
       [specialist_id, tool_id, config_values, config_values]
     );
-    res.json({ success: true, message: 'Specialist equipped with asset' });
+    res.json({ success: true, message: 'Employee equipped with asset' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+
+app.get('/api/specialists/:id/tools', authenticateToken, getEmployeeTools);
+app.get('/api/employees/:id/tools', authenticateToken, getEmployeeTools);
+app.post('/api/specialists/:id/equip', authenticateToken, requireAdmin, equipEmployeeTool);
+app.post('/api/employees/:id/equip', authenticateToken, requireAdmin, equipEmployeeTool);
 
   // --- RUNNER PAYLOAD ENDPOINT ---
 
@@ -2844,12 +3434,16 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
 
   try {
     // 1. Get task details
-    const task = await get('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    const task = await get(`
+      SELECT t.*, c.role as creator_role
+      FROM tasks t
+      LEFT JOIN users c ON t.created_by = c.id
+      WHERE t.id = ?`, [taskId]);
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
     // 2. Get Agent (Identity) details
     let agent = null;
-    let specialists = [];
+    let employees = [];
     let team = null;
 
     if (task.team_id) {
@@ -2859,20 +3453,50 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
       // Get Team Details
       const teamRow = await get('SELECT name, mission_statement, human_in_the_loop FROM teams WHERE id = ?', [task.team_id]);
       const teamLead = await get('SELECT id, name FROM users WHERE team_id = ? AND is_team_lead = 1', [task.team_id]);
-      team = teamRow ? { ...teamRow, lead: teamLead || null, specialists } : null;
 
-      // Get Team Specialists
-      specialists = await all(`
-        SELECT s.name, s.description, s.system_prompt, s.tools 
+      // Get Team Employees
+      employees = await all(`
+        SELECT s.id, s.name, s.description, s.system_prompt, s.tools, s.model_claude, s.model_gemini, s.model_openai
         FROM specialists s
         JOIN team_specialists ts ON s.id = ts.specialist_id
         WHERE ts.team_id = ?
       `, [task.team_id]);
+
+      if (employees.length > 0) {
+        const ids = employees.map(s => s.id);
+        const placeholders = ids.map(() => '?').join(',');
+        const toolRows = await all(`
+          SELECT st.specialist_id, t.id, t.name, t.description, t.type, t.command, t.config_schema, st.config_values
+          FROM specialist_tools st
+          JOIN tools t ON t.id = st.tool_id
+          WHERE st.specialist_id IN (${placeholders})
+        `, ids);
+
+        const toolMap = new Map();
+        for (const row of toolRows) {
+          if (!toolMap.has(row.specialist_id)) toolMap.set(row.specialist_id, []);
+          toolMap.get(row.specialist_id).push({
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            type: row.type,
+            command: row.command,
+            config_schema: row.config_schema,
+            config_values: row.config_values
+          });
+        }
+
+        employees = employees.map(s => ({
+          ...s,
+          equipped_tools: toolMap.get(s.id) || []
+        }));
+      }
+      team = teamRow ? { ...teamRow, lead: teamLead || null, employees } : null;
     } else {
       // Fallback to direct agent assignment
       agent = await get('SELECT name, system_prompt, model_config FROM users WHERE id = ? AND is_ai = 1', [task.agent_id || task.assignee_id]);
-      // For now, fallback to all specialists if not team-bound (or change to none)
-      specialists = await all('SELECT name, description, system_prompt, tools FROM specialists');
+      // For now, fallback to all employees if not team-bound (or change to none)
+      employees = await all('SELECT id, name, description, system_prompt, tools, model_claude, model_gemini, model_openai FROM specialists');
     }
     
     // 3. Get Project details
@@ -2899,12 +3523,15 @@ app.get('/api/runner/task/:id', authenticateToken, async (req, res) => {
         assignee_id: task.assignee_id,
         parent_id: task.parent_id,
         task_type: task.task_type,
-        created_at: task.created_at
+        created_at: task.created_at,
+        created_by: task.created_by,
+        creator_role: task.creator_role,
+        resource_metadata: task.resource_metadata
       },
       identity: agent || { name: 'Generic Agent', system_prompt: 'You are a helpful assistant.' },
       team: team || { name: 'General', mission_statement: 'Execute tasks.' },
       project: project || { name: 'Default', description: '', repository_path: process.cwd(), global_rules: '' },
-      specialists: specialists,
+      employees: employees,
       history: comments
     });
 

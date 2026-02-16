@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145msoftaworks/agent-toolkit@feedback-mastery[0m [36m1.8K installs[0m
+[38;5;102m└ https://skills.sh/softaworks/agent-toolkit/feedback-mastery[0m
+
+[38;5;145manthropics/knowledge-work-plugins@response-drafting[0m [36m49 installs[0m
+[38;5;102m└ https://skills.sh/anthropics/knowledge-work-plugins/response-drafting[0m
+
+[38;5;145manthropics/knowledge-work-plugins@escalation[0m [36m42 installs[0m
+[38;5;102m└ https://skills.sh/anthropics/knowledge-work-plugins/escalation[0m
+
+[38;5;145mrobdtaylor/personal-ai-infrastructure@hoshinkanri[0m [36m8 installs[0m
+[38;5;102m└ https://skills.sh/robdtaylor/personal-ai-infrastructure/hoshinkanri[0m
+
+[38;5;145mgtmagents/gtm-agents@cadence-design[0m [36m7 installs[0m
+[38;5;102m└ https://skills.sh/gtmagents/gtm-agents/cadence-design[0m
+
+[38;5;145mdengineproblem/agents-monorepo@sales-development-rep[0m [36m3 installs[0m
+[38;5;102m└ https://skills.sh/dengineproblem/agents-monorepo/sales-development-rep[0m
+

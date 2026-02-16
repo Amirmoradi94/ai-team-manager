@@ -39,7 +39,7 @@ class AgentExecutor {
    * Sync Runner Brain (Global Intelligence) - ~/team_lead/
    * This is where ALL roles and teams are stored globally
    */
-  async syncRunnerBrain(allSpecialists = [], allTeams = []) {
+  async syncRunnerBrain(allEmployees = [], allTeams = []) {
     try {
       // Ensure Runner Brain directories exist
       await this.ensureDirectoryExists(this.teamLeadDir);
@@ -67,19 +67,19 @@ class AgentExecutor {
       }
 
       // 1. Sync ALL Roles to ~/team_lead/roles/
-      if (allSpecialists && allSpecialists.length > 0) {
-        for (const spec of allSpecialists) {
-          const specFilename = spec.name.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '.md';
-          const specContent = `# Role: ${spec.name}
+      if (allEmployees && allEmployees.length > 0) {
+        for (const employee of allEmployees) {
+          const specFilename = employee.name.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '.md';
+          const specContent = `# Role: ${employee.name}
 
 ## Description
-${spec.description || 'No description provided.'}
+${employee.description || 'No description provided.'}
 
 ## Capabilities
-${spec.system_prompt || 'Standard capabilities.'}
+${employee.system_prompt || 'Standard capabilities.'}
 
 ## Tools
-${spec.tools || 'Standard tools'}
+${employee.tools || 'Standard tools'}
 
 ---
 *This role is globally available to all projects and teams.*
@@ -117,8 +117,8 @@ ${JSON.stringify(lead.model_config || { provider: 'claude' }, null, 2)}
 ${team.mission_statement || 'Execute assigned tasks efficiently.'}
 
 ## Team Roles
-${team.specialists && team.specialists.length > 0
-  ? team.specialists.map(s => {
+${team.employees && team.employees.length > 0
+  ? team.employees.map(s => {
       const specFile = s.name.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '.md';
       return `- **${s.name}**: See \`~/team_lead/roles/${specFile}\``;
     }).join('\n')
@@ -131,7 +131,7 @@ ${team.specialists && team.specialists.length > 0
         }
       }
 
-      console.log(`[Runner Brain] Synced ${allSpecialists.length} roles and ${allTeams.length} teams to ~/team_lead/`);
+      console.log(`[Runner Brain] Synced ${allEmployees.length} roles and ${allTeams.length} teams to ~/team_lead/`);
       return true;
     } catch (error) {
       console.error(`[Runner Brain] Failed to sync:`, error.message);
@@ -252,10 +252,10 @@ When you (an AI agent) are assigned a task in this project:
   }
 
   /**
-   * Physically create sub-agent/specialist files on the local machine
+   * Physically create sub-agent/employee files on the local machine
    * @deprecated Now handled by syncTeamEnvironment inside the project folder
    */
-  async provisionSpecialists(specialists, provider) {
+  async provisionEmployees(employees, provider) {
     // Legacy support kept empty to avoid breaking older calls
   }
 
@@ -295,6 +295,7 @@ When you (an AI agent) are assigned a task in this project:
     try {
       await fs.writeFile(promptFile, prompt);
       let providerCommand = '';
+      let binInit = '';
 
       // Add --model flag if CTO specified a model (never pass model to gemini/codex CLI)
       const modelFlag = model && provider !== 'gemini' && provider !== 'codex' && provider !== 'openai'
@@ -303,25 +304,43 @@ When you (an AI agent) are assigned a task in this project:
 
       switch (provider) {
         case 'gemini':
-          providerCommand = `gemini --yolo -p "$(cat ${promptFile})"`;
+          binInit = `GEMINI_BIN="${'${'}GEMINI_BIN:-$(command -v gemini)}"
+if [ -z "$GEMINI_BIN" ]; then echo "gemini: command not found" >&2; exit 127; fi`;
+          providerCommand = `"${'${'}GEMINI_BIN}" --yolo -p "$(cat ${promptFile})"`;
           break;
         case 'codex':
         case 'openai':
-          providerCommand = `codex -p --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"${modelFlag}`;
+          binInit = `CODEX_BIN="${'${'}CODEX_BIN:-$(command -v codex)}"
+if [ -z "$CODEX_BIN" ]; then echo "codex: command not found" >&2; exit 127; fi`;
+          providerCommand = `"${'${'}CODEX_BIN}" exec --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"`;
           break;
         case 'claude':
         default:
-          providerCommand = `claude -p "$(cat ${promptFile})" --dangerously-skip-permissions${modelFlag}`;
+          binInit = `CLAUDE_BIN="${'${'}CLAUDE_BIN:-$(command -v claude)}"
+if [ -z "$CLAUDE_BIN" ]; then echo "claude: command not found" >&2; exit 127; fi`;
+          providerCommand = `"${'${'}CLAUDE_BIN}" -p "$(cat ${promptFile})" --dangerously-skip-permissions${modelFlag}`;
           break;
       }
 
       // Build env exports
-      const envExports = Object.entries(envVars)
+      const envExports = Object.entries({
+        ...envVars,
+        HOME: process.env.HOME || '',
+        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || ''
+      })
         .map(([key, val]) => `export ${key}="${val.replace(/"/g, '\\"')}"`)
         .join('\n');
 
       const workingDir = options.workDir || this.workDir;
-      const scriptContent = `#!/bin/bash\nset -e\ncd ${workingDir}\n${envExports}\n${providerCommand} > ${outputFile} 2>&1\nexit $?\n`;
+      const scriptContent = `#!/bin/bash
+set -e
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+cd ${workingDir}
+${envExports}
+${binInit}
+${providerCommand} > ${outputFile} 2>&1
+exit $?
+`;
       await fs.writeFile(wrapperScript, scriptContent);
       await fs.chmod(wrapperScript, '755');
       console.log(`[Executor] Launching ${provider} CLI in background...`);
@@ -364,21 +383,36 @@ When you (an AI agent) are assigned a task in this project:
       await fs.writeFile(promptFile, prompt);
 
       let providerCommand = '';
+      let binInit = '';
       switch (provider) {
         case 'gemini':
-          providerCommand = `gemini --yolo -p "$(cat ${promptFile})"`;
+          binInit = `GEMINI_BIN="${'${'}GEMINI_BIN:-$(command -v gemini)}"
+if [ -z "$GEMINI_BIN" ]; then echo "gemini: command not found" >&2; exit 127; fi`;
+          providerCommand = `"${'${'}GEMINI_BIN}" --yolo -p "$(cat ${promptFile})"`;
           break;
         case 'codex':
         case 'openai':
-          providerCommand = `codex -p --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"`;
+          binInit = `CODEX_BIN="${'${'}CODEX_BIN:-$(command -v codex)}"
+if [ -z "$CODEX_BIN" ]; then echo "codex: command not found" >&2; exit 127; fi`;
+          providerCommand = `"${'${'}CODEX_BIN}" exec --dangerously-bypass-approvals-and-sandbox --sandbox danger-full-access "$(cat ${promptFile})"`;
           break;
         case 'claude':
         default:
-          providerCommand = `claude -p "$(cat ${promptFile})" --dangerously-skip-permissions`;
+          binInit = `CLAUDE_BIN="${'${'}CLAUDE_BIN:-$(command -v claude)}"
+if [ -z "$CLAUDE_BIN" ]; then echo "claude: command not found" >&2; exit 127; fi`;
+          providerCommand = `"${'${'}CLAUDE_BIN}" -p "$(cat ${promptFile})" --dangerously-skip-permissions`;
           break;
       }
 
-      const scriptContent = `#!/bin/bash\nset -e\n${providerCommand} > ${outputFile} 2>&1\nexit $?\n`;
+      const scriptContent = `#!/bin/bash
+set -e
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export HOME="${process.env.HOME || ''}"
+export XDG_CONFIG_HOME="${process.env.XDG_CONFIG_HOME || ''}"
+${binInit}
+${providerCommand} > ${outputFile} 2>&1
+exit $?
+`;
       await fs.writeFile(wrapperScript, scriptContent);
       await fs.chmod(wrapperScript, '755');
 
@@ -513,7 +547,7 @@ When you (an AI agent) are assigned a task in this project:
     }
   }
 
-  async executeKanbanTask(task, history = [], identity = {}, specialists = [], project = {}, team = {}, allSpecialists = [], options = {}) {
+  async executeKanbanTask(task, history = [], identity = {}, employees = [], project = {}, team = {}, allEmployees = [], options = {}) {
     // 1. Sync Project Context (lightweight, project-specific)
     const contextDir = await this.syncProjectContext(project, team);
 
@@ -548,7 +582,7 @@ When you (an AI agent) are assigned a task in this project:
     let arsenalEnv = {};
     try {
       if (identity.id) {
-        const tools = await this.taskAPI.getSpecialistTools(identity.id);
+        const tools = await this.taskAPI.getEmployeeTools(identity.id);
         if (tools && tools.length > 0) {
           arsenalBlock = `
 <equipped_arsenal>
@@ -588,7 +622,7 @@ You are **${identity.name}**, the **TEAM LEAD** for **${team.name}**.
 🎯 **Your Role:**
 As Team Lead, you are NOT just an individual contributor. You are a MANAGER responsible for:
 - **Strategic Planning**: Breaking down tasks and planning the approach
-- **Team Coordination**: Delegating work to your specialist team members when appropriate
+- **Team Coordination**: Delegating work to your employee team members when appropriate
 - **Quality Oversight**: Ensuring all work meets high standards
 - **Execution**: Completing tasks yourself when appropriate, or orchestrating team efforts
 - **Reporting**: Delivering clear, complete results to stakeholders
@@ -625,8 +659,8 @@ ${conversationHistory ? '**Previous Context:**' + conversationHistory : ''}
 2. **ANALYZE** - Break down the requirements and complexity
 3. **PLAN** - Decide the best approach:
    - Can you handle this directly? → Execute it
-   - Need specialist expertise? → Read their role docs and leverage their capabilities
-   - Complex multi-part task? → Coordinate multiple specialists
+   - Need employee expertise? → Read their role docs and leverage their capabilities
+   - Complex multi-part task? → Coordinate multiple employees
 4. **EXECUTE** - Complete the work with excellence
    - **USE YOUR ARSENAL**: If you have equipped tools, use them instead of writing custom code for those tasks.
 5. **VERIFY** - Ensure quality and completeness
@@ -641,6 +675,11 @@ ${conversationHistory ? '**Previous Context:**' + conversationHistory : ''}
 
 <instruction>
 Now, as the Team Lead, complete this task with excellence. Show your leadership by delivering outstanding results.
+
+**Tool/Skill Policy (REQUIRED):**
+- You must delegate to the specific employee who is equipped with a tool/skill before it is used.
+- Do not use tools/skills directly unless you are that equipped employee.
+- If no equipped employee exists, request clarification.
 
 **IMPORTANT - Final Deliverable:**
 After completing the work, you MUST provide a completion summary in this exact format:
@@ -660,6 +699,12 @@ After completing the work, you MUST provide a completion summary in this exact f
 ---END REPORT---
 
 This report will be shown to the project stakeholders, so make it clear, professional, and informative.
+
+**If you need clarification:**
+Respond with the following block and DO NOT proceed with execution:
+---NEEDS_CLARIFICATION---
+[Your questions for CEO]
+---END_CLARIFICATION---
 </instruction>
     `.trim();
 

@@ -1,1 +1,0 @@
-npx expo install expo@next --fix  # install beta

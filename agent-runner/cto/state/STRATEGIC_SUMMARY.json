@@ -1,15 +1,15 @@
 {
-  "totalTasks": 18,
-  "successRate": 66.66666666666666,
+  "totalTasks": 22,
+  "successRate": 72.72727272727273,
   "providerPerformance": {
     "claude": {
-      "total": 18,
-      "success": 12,
+      "total": 21,
+      "success": 15,
       "avgRetries": 0
     },
     "gemini": {
-      "total": 0,
-      "success": 0,
+      "total": 1,
+      "success": 1,
       "avgRetries": 0
     },
     "codex": {
@@ -33,19 +33,23 @@
       }
     },
     "general": {
-      "total": 2,
-      "success": 2,
+      "total": 6,
+      "success": 6,
       "bestProvider": "claude",
       "avgRetries": 0,
       "successRate": 100,
       "providerStats": {
         "claude": {
-          "total": 2,
-          "success": 2
+          "total": 5,
+          "success": 5
+        },
+        "gemini": {
+          "total": 1,
+          "success": 1
         }
       }
     }
   },
   "epicCompletionRate": 0,
-  "lastUpdated": "2026-02-13T12:56:01.745Z"
+  "lastUpdated": "2026-02-16T13:45:44.779Z"
 }

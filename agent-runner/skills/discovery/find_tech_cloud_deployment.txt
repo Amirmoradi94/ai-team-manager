@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145mwshobson/agents@multi-cloud-architecture[0m [36m1.5K installs[0m
+[38;5;102m└ https://skills.sh/wshobson/agents/multi-cloud-architecture[0m
+
+[38;5;145msickn33/antigravity-awesome-skills@multi-cloud-architecture[0m [36m35 installs[0m
+[38;5;102m└ https://skills.sh/sickn33/antigravity-awesome-skills/multi-cloud-architecture[0m
+
+[38;5;145msamhvw8/dotfiles@infra-engineer[0m [36m31 installs[0m
+[38;5;102m└ https://skills.sh/samhvw8/dotfiles/infra-engineer[0m
+
+[38;5;145msecondsky/sap-skills@sap-cap-capire[0m [36m24 installs[0m
+[38;5;102m└ https://skills.sh/secondsky/sap-skills/sap-cap-capire[0m
+
+[38;5;145m89jobrien/steve@cloud-infrastructure[0m [36m14 installs[0m
+[38;5;102m└ https://skills.sh/89jobrien/steve/cloud-infrastructure[0m
+
+[38;5;145mferdousbhai/cloud-fullstack-skills@modal-deployment[0m [36m13 installs[0m
+[38;5;102m└ https://skills.sh/ferdousbhai/cloud-fullstack-skills/modal-deployment[0m
+

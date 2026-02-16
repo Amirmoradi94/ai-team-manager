@@ -168,7 +168,7 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
                       <motion.div
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex justify-center mb-16"
+                        className="flex justify-center mb-10"
                       >
                         <div className="relative">
                           <div className="px-8 py-5 rounded-2xl bg-gradient-to-br from-primary/20 via-primary/10 to-primary/5 border-2 border-primary shadow-2xl shadow-primary/20">
@@ -185,7 +185,7 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
 
                           {/* Vertical connector line */}
                           {team.employees && team.employees.length > 0 && (
-                            <div className="absolute left-1/2 top-full w-0.5 h-12 bg-gradient-to-b from-primary/50 to-transparent transform -translate-x-1/2" />
+                            <div className="absolute left-1/2 top-full w-0.5 h-10 bg-gradient-to-b from-primary/70 via-primary/40 to-transparent transform -translate-x-1/2" />
                           )}
                         </div>
                       </motion.div>
@@ -194,10 +194,10 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
                       {team.employees && team.employees.length > 0 ? (
                         <div className="relative">
                           {/* Horizontal connector line */}
-                          <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
+                          <div className="absolute -top-2 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
 
                           {/* Employees Grid */}
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mt-8">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mt-10">
                             {team.employees.map((spec: any, index: number) => (
                               <motion.div
                                 key={spec.id}
@@ -207,7 +207,7 @@ export function TeamDetailModal({ team, isOpen, onClose, onEdit }: TeamDetailMod
                                 className="relative"
                               >
                                 {/* Vertical connector to horizontal line */}
-                                <div className="absolute left-1/2 -top-8 w-0.5 h-8 bg-gradient-to-b from-primary/30 to-transparent transform -translate-x-1/2" />
+                                <div className="absolute left-1/2 -top-10 w-0.5 h-10 bg-gradient-to-b from-primary/60 via-primary/30 to-transparent transform -translate-x-1/2" />
 
                                 <div className="px-4 py-4 rounded-xl bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-transparent border border-cyan-400/30 hover:border-cyan-400/60 transition-all hover:shadow-lg hover:shadow-cyan-500/10 group">
                                   <div className="flex items-center gap-2 mb-2">

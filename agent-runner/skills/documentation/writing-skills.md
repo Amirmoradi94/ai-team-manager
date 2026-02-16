@@ -1,4 +1,0 @@
-skills/
-skill-name/
-SKILL.md              # Main reference (required)
-supporting-file.*     # Only if needed

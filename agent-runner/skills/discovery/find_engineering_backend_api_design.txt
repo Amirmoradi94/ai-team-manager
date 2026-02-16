@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145mmodu-ai/moai-adk@moai-domain-backend[0m [36m54 installs[0m
+[38;5;102m└ https://skills.sh/modu-ai/moai-adk/moai-domain-backend[0m
+
+[38;5;145mdaffy0208/ai-dev-standards@deployment advisor[0m [36m38 installs[0m
+[38;5;102m└ https://skills.sh/daffy0208/ai-dev-standards/deployment-advisor[0m
+
+[38;5;145mborghei/claude-skills@senior-fullstack[0m [36m28 installs[0m
+[38;5;102m└ https://skills.sh/borghei/claude-skills/senior-fullstack[0m
+
+[38;5;145mdauquangthanh/hanoi-rainbow@backend-design[0m [36m13 installs[0m
+[38;5;102m└ https://skills.sh/dauquangthanh/hanoi-rainbow/backend-design[0m
+
+[38;5;145mhtlin222/dotfiles@backend[0m [36m9 installs[0m
+[38;5;102m└ https://skills.sh/htlin222/dotfiles/backend[0m
+
+[38;5;145mmodu-ai/moai-rank@moai-domain-backend[0m [36m8 installs[0m
+[38;5;102m└ https://skills.sh/modu-ai/moai-rank/moai-domain-backend[0m
+

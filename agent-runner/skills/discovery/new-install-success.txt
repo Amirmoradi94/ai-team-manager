@@ -1,0 +1,16 @@
+404kidwiz/claude-supercode-skills@event-driven-architect
+aaron-he-zhu/seo-geo-claude-skills@alert-manager
+aj-geddes/useful-ai-prompts@api-versioning-strategy
+aj-geddes/useful-ai-prompts@microservices-architecture
+bobmatnyc/claude-mpm-skills@kubernetes
+coreyhaines31/marketingskills@page-cro
+davila7/claude-code-templates@devops-iac-engineer
+davila7/claude-code-templates@marketing-strategy-pmm
+inference-sh-1/skills@landing-page-design
+mrgoonie/claudekit-skills@code-review
+refoundai/lenny-skills@enterprise-sales
+refoundai/lenny-skills@founder-sales
+sickn33/antigravity-awesome-skills@backend-architect
+sickn33/antigravity-awesome-skills@code-refactoring-tech-debt
+sickn33/antigravity-awesome-skills@performance-profiling
+softaworks/agent-toolkit@feedback-mastery

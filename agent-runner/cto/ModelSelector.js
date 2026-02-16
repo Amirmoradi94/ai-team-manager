@@ -11,8 +11,8 @@
 const MODELS = {
   // Gemini models
   gemini: {
-    'gemini-3-pro': {
-      name: 'gemini-3-pro',
+    'gemini-3-pro-preview': {
+      name: 'gemini-3-pro-preview',
       provider: 'gemini',
       contextWindow: 1000000,
       costPer1kTokens: 0.002,
@@ -23,24 +23,24 @@ const MODELS = {
 
   // Claude models
   claude: {
-    'claude-opus-4.5': {
-      name: 'claude-opus-4.5',
+    'claude-opus-4-5-20251101': {
+      name: 'claude-opus-4-5-20251101',
       provider: 'claude',
       contextWindow: 200000,
       costPer1kTokens: 0.015,
       speed: 'medium',
       capability: 'highest'
     },
-    'claude-sonnet-4.5': {
-      name: 'claude-sonnet-4.5',
+    'claude-sonnet-4-5-20250929': {
+      name: 'claude-sonnet-4-5-20250929',
       provider: 'claude',
       contextWindow: 200000,
       costPer1kTokens: 0.003,
       speed: 'fast',
       capability: 'high'
     },
-    'claude-haiku-4.5': {
-      name: 'claude-haiku-4.5',
+    'claude-haiku-4-5-20251001': {
+      name: 'claude-haiku-4-5-20251001',
       provider: 'claude',
       contextWindow: 200000,
       costPer1kTokens: 0.0008,
@@ -51,16 +51,24 @@ const MODELS = {
 
   // OpenAI GPT models
   openai: {
-    'gpt-5.2': {
-      name: 'gpt-5.2',
+    'gpt-5.2-pro': {
+      name: 'gpt-5.2-pro',
       provider: 'openai',
       contextWindow: 128000,
       costPer1kTokens: 0.010,
       speed: 'fast',
       capability: 'highest'
     },
-    'gpt-5.2-mini': {
-      name: 'gpt-5.2-mini',
+    'gpt-5.2': {
+      name: 'gpt-5.2',
+      provider: 'openai',
+      contextWindow: 128000,
+      costPer1kTokens: 0.006,
+      speed: 'fast',
+      capability: 'high'
+    },
+    'gpt-5-mini': {
+      name: 'gpt-5-mini',
       provider: 'openai',
       contextWindow: 128000,
       costPer1kTokens: 0.002,
@@ -85,12 +93,13 @@ class ModelSelector {
 
     // CTO preferred models (in priority order)
     this.preferredModels = config.preferredModels || [
-      'gemini-3-pro',
-      'claude-opus-4.5',
+      'gemini-3-pro-preview',
+      'claude-opus-4-5-20251101',
+      'gpt-5.2-pro',
+      'claude-sonnet-4-5-20250929',
       'gpt-5.2',
-      'claude-sonnet-4.5',
-      'gpt-5.2-mini',
-      'claude-haiku-4.5'
+      'gpt-5-mini',
+      'claude-haiku-4-5-20251001'
     ];
   }
 
@@ -102,15 +111,15 @@ class ModelSelector {
   selectModel(taskComplexity = 'moderate') {
     // For complex/epic tasks, prefer highest capability models
     const highCapabilityModels = [
-      'claude-opus-4.5',
-      'gpt-5.2',
-      'gemini-3-pro'
+      'claude-opus-4-5-20251101',
+      'gpt-5.2-pro',
+      'gemini-3-pro-preview'
     ];
 
     // For simple tasks, prefer fast/cheap models
     const efficientModels = [
-      'claude-haiku-4.5',
-      'gpt-5.2-mini'
+      'claude-haiku-4-5-20251001',
+      'gpt-5-mini'
     ];
 
     let candidateModels;

@@ -1,1 +1,0 @@
-npx atxp-call https://claw.direct/mcp &#x3C;tool_name> '&#x3C;json_params>'

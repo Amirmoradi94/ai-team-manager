@@ -182,9 +182,10 @@ export function EmployeeTemplatesModal({
             className="relative w-full max-w-6xl z-10 max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="glass-card-dark p-6 glow-border flex flex-col max-h-[90vh]">
+            <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_25px_60px_rgba(0,0,0,0.35)] flex flex-col max-h-[90vh]">
+              <div className="absolute -right-28 -top-24 h-64 w-64 rounded-full bg-teal-500/10 blur-3xl" />
               {/* Header */}
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-6 relative z-10">
                 <div>
                   <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
                     <Lightbulb className="w-6 h-6 text-primary" />
@@ -203,12 +204,12 @@ export function EmployeeTemplatesModal({
               </div>
 
               {/* Search and Filter */}
-              <div className="flex gap-3 mb-4">
+              <div className="flex gap-3 mb-4 relative z-10">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Search employees..."
-                    className="pl-9 bg-secondary/50 border-0"
+                    className="pl-9 bg-slate-900/70 border border-teal-500/20"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -216,14 +217,14 @@ export function EmployeeTemplatesModal({
                 <Button
                   variant="outline"
                   onClick={onCreateFromScratch}
-                  className="whitespace-nowrap"
+                  className="whitespace-nowrap border-teal-500/30 text-teal-100 hover:bg-teal-500/10"
                 >
                   Hire from Scratch
                 </Button>
               </div>
 
               {/* AI Recommendations */}
-              <div className="mb-6 p-3 rounded-lg bg-primary/5 border border-primary/20">
+              <div className="mb-6 p-4 rounded-2xl bg-slate-900/60 border border-teal-500/25 relative z-10">
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkles className="w-4 h-4 text-primary" />
                   <h3 className="text-sm font-semibold text-foreground">AI-Powered Recommendations</h3>
@@ -231,14 +232,14 @@ export function EmployeeTemplatesModal({
                 <div className="flex gap-2 items-start">
                   <Input
                     placeholder="e.g., I want to build a complete digital marketing team"
-                    className="bg-secondary/50 border-0 text-sm"
+                    className="bg-slate-900/70 border border-teal-500/20 text-sm"
                     value={goal}
                     onChange={(e) => setGoal(e.target.value)}
                   />
                   <Button
                     onClick={handleGetRecommendations}
                     disabled={isLoadingRecommendations || !goal.trim()}
-                    className="bg-primary hover:bg-primary/90 whitespace-nowrap shrink-0"
+                    className="bg-teal-400 text-slate-900 hover:bg-teal-300 whitespace-nowrap shrink-0"
                     size="default"
                   >
                     {isLoadingRecommendations ? (
@@ -249,7 +250,7 @@ export function EmployeeTemplatesModal({
                   </Button>
                 </div>
                 {recommendedIds.length > 0 && (
-                  <div className="mt-3 p-3 rounded bg-secondary/30 space-y-3">
+                  <div className="mt-3 p-3 rounded-xl bg-slate-900/70 border border-teal-500/20 space-y-3">
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-medium text-foreground">
                         ✨ {recommendedIds.length} Employees Recommended
@@ -270,7 +271,7 @@ export function EmployeeTemplatesModal({
                       <Button
                         onClick={handleBulkAdd}
                         disabled={selectedRoleIds.length === 0}
-                        className="flex-1 bg-primary hover:bg-primary/90 text-sm h-9"
+                        className="flex-1 bg-teal-400 text-slate-900 hover:bg-teal-300 text-sm h-9"
                       >
                         Hire Selected ({selectedRoleIds.length})
                       </Button>
@@ -278,7 +279,7 @@ export function EmployeeTemplatesModal({
                         onClick={() => setShowReviewModal(true)}
                         disabled={selectedRoleIds.length === 0}
                         variant="outline"
-                        className="flex-1 text-sm h-9"
+                        className="flex-1 text-sm h-9 border-teal-500/30 text-teal-100 hover:bg-teal-500/10"
                       >
                         Review & Customize
                       </Button>
@@ -288,13 +289,13 @@ export function EmployeeTemplatesModal({
               </div>
 
               {/* Category Pills */}
-              <div className="flex gap-2 mb-6 flex-wrap">
+              <div className="flex gap-2 mb-6 flex-wrap relative z-10">
                 <button
                   onClick={() => setSelectedCategory('All')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     selectedCategory === 'All'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary/50 text-muted-foreground hover:bg-secondary'
+                      ? 'bg-teal-400 text-slate-900'
+                      : 'bg-slate-900/60 text-muted-foreground hover:bg-slate-900/80'
                   }`}
                 >
                   All ({SPECIALIST_TEMPLATES.length})
@@ -308,8 +309,8 @@ export function EmployeeTemplatesModal({
                       onClick={() => setSelectedCategory(category)}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                         selectedCategory === category
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-secondary/50 text-muted-foreground hover:bg-secondary'
+                          ? 'bg-teal-400 text-slate-900'
+                          : 'bg-slate-900/60 text-muted-foreground hover:bg-slate-900/80'
                       }`}
                     >
                       <Icon className="w-4 h-4" />
@@ -320,7 +321,7 @@ export function EmployeeTemplatesModal({
               </div>
 
               {/* Templates Grid */}
-              <div className="flex-1 overflow-y-auto custom-scrollbar">
+              <div className="flex-1 overflow-y-auto custom-scrollbar relative z-10">
                 {templatesByCategory.length === 0 ? (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground">No employees found matching your search.</p>
@@ -347,12 +348,12 @@ export function EmployeeTemplatesModal({
                                 <motion.div
                                   key={template.id}
                                   whileHover={{ scale: 1.02 }}
-                                  className={`glass-card p-4 border transition-all cursor-pointer group relative ${
+                                  className={`rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/10 p-4 shadow-[0_18px_45px_rgba(0,0,0,0.25)] transition-all cursor-pointer group relative ${
                                     isSelected
-                                      ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
+                                      ? 'border-teal-400/70 bg-teal-500/10 shadow-lg shadow-teal-500/20'
                                       : isRecommended
-                                      ? 'border-primary/70 bg-primary/5 shadow-lg shadow-primary/20'
-                                      : 'border-border hover:border-primary/50'
+                                      ? 'border-teal-400/60 bg-teal-500/5 shadow-lg shadow-teal-500/20'
+                                      : 'border-border/60 hover:border-teal-500/40'
                                   }`}
                                   onClick={() => onSelectTemplate(template)}
                                 >
@@ -378,34 +379,34 @@ export function EmployeeTemplatesModal({
                                     </div>
                                   )}
                                   <div className={`flex items-start justify-between mb-3 ${recommendedIds.length > 0 ? 'ml-8' : ''}`}>
-                                    <h4 className="font-semibold text-foreground text-base group-hover:text-primary transition-colors">
+                                    <h4 className="font-semibold text-foreground text-base group-hover:text-teal-200 transition-colors">
                                       {template.name}
                                     </h4>
-                                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors opacity-0 group-hover:opacity-100" />
+                                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-teal-200 transition-colors opacity-0 group-hover:opacity-100" />
                                   </div>
 
-                                <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                                  {template.description}
-                                </p>
+                                  <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                                    {template.description}
+                                  </p>
 
-                                <div className="flex flex-wrap gap-1">
-                                  {template.tools.slice(0, 3).map(tool => (
-                                    <span
-                                      key={tool}
-                                      className="text-xs px-2 py-0.5 rounded bg-secondary/50 text-muted-foreground"
-                                    >
-                                      {tool.replace('_', ' ')}
-                                    </span>
-                                  ))}
-                                  {template.tools.length > 3 && (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-secondary/50 text-muted-foreground">
-                                      +{template.tools.length - 3}
-                                    </span>
-                                  )}
-                                </div>
-                              </motion.div>
-                            );
-                          })}
+                                  <div className="flex flex-wrap gap-1">
+                                    {template.tools.slice(0, 3).map(tool => (
+                                      <span
+                                        key={tool}
+                                        className="text-xs px-2 py-0.5 rounded bg-teal-500/10 text-teal-100 border border-teal-500/30"
+                                      >
+                                        {tool.replace('_', ' ')}
+                                      </span>
+                                    ))}
+                                    {template.tools.length > 3 && (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-teal-500/10 text-teal-100 border border-teal-500/30">
+                                        +{template.tools.length - 3}
+                                      </span>
+                                    )}
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -434,9 +435,10 @@ export function EmployeeTemplatesModal({
                   className="relative w-full max-w-4xl z-10 max-h-[90vh] flex flex-col"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="glass-card-dark p-6 glow-border flex flex-col max-h-[90vh]">
+                  <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_25px_60px_rgba(0,0,0,0.35)] flex flex-col max-h-[90vh]">
+                    <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/10 blur-3xl" />
                     {/* Header */}
-                    <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center justify-between mb-6 relative z-10">
                       <div>
                         <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
                           <Sparkles className="w-6 h-6 text-primary" />
@@ -455,7 +457,7 @@ export function EmployeeTemplatesModal({
                     </div>
 
                     {/* Selected Roles List */}
-                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 mb-6">
+                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 mb-6 relative z-10">
                       {selectedRoleIds.map(roleId => {
                         const template = SPECIALIST_TEMPLATES.find(t => t.id === roleId);
                         if (!template) return null;
@@ -463,7 +465,7 @@ export function EmployeeTemplatesModal({
                         return (
                           <div
                             key={roleId}
-                            className="glass-card p-5 border border-primary/30 bg-primary/5 hover:border-primary/50 transition-all"
+                            className="rounded-2xl border border-teal-500/30 bg-slate-900/60 p-5 shadow-[0_18px_45px_rgba(0,0,0,0.25)] hover:border-teal-400/60 transition-all"
                           >
                             <div className="flex items-start justify-between mb-3">
                               <div className="flex-1">
@@ -471,18 +473,18 @@ export function EmployeeTemplatesModal({
                                 <p className="text-sm text-muted-foreground mb-3">{template.description}</p>
 
                                 <div className="space-y-2">
-                                  <p className="text-xs font-medium text-primary/80 uppercase tracking-wide">System Prompt Preview</p>
-                                  <div className="p-3 rounded-lg bg-black/40 border border-white/5 font-mono text-[10px] text-green-400/80 max-h-32 overflow-y-auto line-clamp-4">
+                                  <p className="text-xs font-medium text-teal-200/80 uppercase tracking-wide">System Prompt Preview</p>
+                                  <div className="p-3 rounded-xl bg-black/40 border border-teal-500/20 font-mono text-[10px] text-emerald-200/80 max-h-32 overflow-y-auto line-clamp-4">
                                     {template.systemPrompt}
                                   </div>
                                 </div>
 
                                 <div className="flex flex-wrap gap-1 mt-3">
-                                  <span className="text-[10px] font-semibold text-primary/60 uppercase tracking-wide mr-2">Tools:</span>
+                                  <span className="text-[10px] font-semibold text-teal-200/70 uppercase tracking-wide mr-2">Tools:</span>
                                   {template.tools.map(tool => (
                                     <span
                                       key={tool}
-                                      className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20"
+                                      className="text-xs px-2 py-0.5 rounded bg-teal-500/10 text-teal-100 border border-teal-500/30"
                                     >
                                       {tool.replace('_', ' ')}
                                     </span>
@@ -506,7 +508,7 @@ export function EmployeeTemplatesModal({
                                 setShowReviewModal(false);
                                 onSelectTemplate(template);
                               }}
-                              className="w-full mt-3"
+                              className="w-full mt-3 border-teal-500/30 text-teal-100 hover:bg-teal-500/10"
                             >
                               Customize This Employee
                             </Button>
@@ -516,11 +518,11 @@ export function EmployeeTemplatesModal({
                     </div>
 
                     {/* Footer Actions */}
-                    <div className="flex gap-3 pt-4 border-t border-border">
+                    <div className="flex gap-3 pt-4 border-t border-teal-500/20 relative z-10">
                       <Button
                         variant="outline"
                         onClick={() => setShowReviewModal(false)}
-                        className="flex-1"
+                        className="flex-1 border-teal-500/30 text-teal-100 hover:bg-teal-500/10"
                       >
                         Back to Selection
                       </Button>
@@ -530,7 +532,7 @@ export function EmployeeTemplatesModal({
                           setShowReviewModal(false);
                         }}
                         disabled={selectedRoleIds.length === 0}
-                        className="flex-1 bg-primary hover:bg-primary/90"
+                        className="flex-1 bg-teal-400 text-slate-900 hover:bg-teal-300"
                       >
                         Hire All {selectedRoleIds.length} Employees
                       </Button>

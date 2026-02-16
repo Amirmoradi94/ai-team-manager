@@ -29,7 +29,7 @@ interface SidebarProps {
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
-  { icon: Brain, label: 'CTO', id: 'cto', badge: 'AI' },
+  { icon: Brain, label: 'CTO', id: 'cto' },
   { icon: FolderKanban, label: 'Projects', id: 'projects' },
   { icon: Users, label: 'Teams', id: 'team' },
   { icon: Zap, label: 'My Employees', id: 'employees' },
@@ -114,72 +114,7 @@ export function Sidebar({
           })}
         </div>
 
-        {/* Company Leadership Section (Humans & AI) */}
-        <div className="mt-8 px-2">
-          <div className="flex items-center justify-between mb-2 px-2">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-              <Users className="w-3 h-3" />
-              Company Leadership
-            </span>
-            <button
-              onClick={onInvite}
-              className="p-1 rounded hover:bg-sidebar-accent transition-colors text-muted-foreground hover:text-primary"
-              title="Invite team member"
-            >
-              <Plus className="w-3 h-3" />
-            </button>
-          </div>
-
-          <div className="space-y-0">
-            {humanMembers.map((member, index) => {
-              const isLast = index === humanMembers.length - 1;
-              return (
-                <div key={member.id} className="flex items-center h-9">
-                  {/* Tree line */}
-                  <div className="flex flex-col items-center w-5 h-full relative flex-shrink-0">
-                    <div className={`absolute top-0 left-2 w-px h-1/2 bg-border ${index === 0 ? 'hidden' : ''}`} />
-                    <div className="absolute top-1/2 left-2 w-px h-1/2 bg-border" style={{ display: isLast ? 'none' : 'block' }} />
-                    <div className="absolute top-1/2 left-2 w-3 h-px bg-border" />
-                  </div>
-
-                  <div className="flex-1 flex items-center gap-2 py-1 px-2 rounded-md hover:bg-sidebar-accent transition-colors group">
-                    <Avatar className="w-6 h-6 flex-shrink-0">
-                      <AvatarImage src={member.avatar} alt={member.name} />
-                      <AvatarFallback className="text-[10px] bg-secondary">
-                        {member.name.split(' ').map(n => n[0]).join('')}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 text-left min-w-0">
-                      <p className="text-xs text-sidebar-foreground group-hover:text-foreground transition-colors truncate">
-                        {member.name}
-                      </p>
-                    </div>
-                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${member.id === currentUser?.id ? 'bg-success' : 'bg-muted'}`} />
-
-                    {member.id !== currentUser?.id && onDeleteMember && (
-                      <button
-                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/20 transition-all flex-shrink-0"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteMember(member.id);
-                        }}
-                        title="Remove member"
-                      >
-                        <Trash2 className="w-3 h-3 text-destructive" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {humanMembers.length === 0 && (
-              <div className="flex items-center gap-0">
-                <div className="w-5" />
-                <p className="text-[10px] text-muted-foreground px-2 py-2">No members</p>
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Company Leadership Section removed */}
       </nav>
 
       {/* User Profile */}

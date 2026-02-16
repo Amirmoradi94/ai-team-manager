@@ -31,12 +31,12 @@ interface CTOConfig {
 const DEFAULT_CONFIG: CTOConfig = {
   enabled: true,
   useAIForDecisions: true,
-  ctoProvider: 'gemini-3-pro',
+  ctoProvider: 'gemini-3-pro-preview',
   strategy: 'balanced',
   autonomyLevel: 'full',
   activeProviders: ['claude', 'gemini', 'codex'],
   models: {
-    preferredModels: ['gemini-3-pro', 'claude-opus-4.5', 'gpt-5.2', 'claude-sonnet-4.5']
+    preferredModels: ['gemini-3-pro-preview', 'claude-opus-4-5-20251101', 'gpt-5.2-pro', 'gpt-5.2', 'claude-sonnet-4-5-20250929']
   },
   subscriptions: {
     claude: { plan: 'max5x' },
@@ -353,12 +353,13 @@ export function CTOSettings() {
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
                   >
                     <optgroup label="Primary Models">
-                      <option value="gemini-3-pro">Gemini 3 Pro</option>
-                      <option value="claude-opus-4.5">Claude Opus 4.5</option>
+                      <option value="gemini-3-pro-preview">Gemini 3 Pro Preview</option>
+                      <option value="claude-opus-4-5-20251101">Claude Opus 4.5</option>
+                      <option value="gpt-5.2-pro">GPT-5.2 Pro</option>
                       <option value="gpt-5.2">GPT-5.2</option>
                     </optgroup>
                     <optgroup label="Fast Models">
-                      <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
+                      <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
                     </optgroup>
                   </select>
                 </div>
@@ -381,9 +382,27 @@ export function CTOSettings() {
                           }))}
                           className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                         >
-                          <option value="pro">Pro</option>
-                          <option value="max5x">Max 5x / Ultra</option>
-                          <option value="max20x">Max 20x</option>
+                          {provider === 'claude' && (
+                            <>
+                              <option value="pro">Pro</option>
+                              <option value="max5x">Max 5x / Ultra</option>
+                              <option value="max20x">Max 20x</option>
+                            </>
+                          )}
+                          {provider === 'gemini' && (
+                            <>
+                              <option value="pro">Pro</option>
+                              <option value="ultra">Ultra</option>
+                            </>
+                          )}
+                          {provider === 'codex' && (
+                            <>
+                              <option value="plus">Plus</option>
+                              <option value="pro">Pro</option>
+                              <option value="business">Business</option>
+                              <option value="enterprise">Enterprise</option>
+                            </>
+                          )}
                         </select>
                       </div>
                     ))}

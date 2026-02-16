@@ -130,9 +130,9 @@ class ProviderIntelligence {
 
   _getModel(provider) {
     switch (provider) {
-      case 'claude': return 'sonnet';
-      case 'gemini': return 'pro';
-      case 'codex':  return 'default';
+      case 'claude': return 'claude-sonnet-4-5-20250929';
+      case 'gemini': return 'gemini-3-pro-preview';
+      case 'codex':  return 'gpt-5.2';
       default: return 'default';
     }
   }

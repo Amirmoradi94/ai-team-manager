@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145mapify/agent-skills@apify-lead-generation[0m [36m469 installs[0m
+[38;5;102m└ https://skills.sh/apify/agent-skills/apify-lead-generation[0m
+
+[38;5;145mvasilyu1983/ai-agents-public@marketing-leads-generation[0m [36m81 installs[0m
+[38;5;102m└ https://skills.sh/vasilyu1983/ai-agents-public/marketing-leads-generation[0m
+
+[38;5;145mwondelai/skills@scorecard-marketing[0m [36m73 installs[0m
+[38;5;102m└ https://skills.sh/wondelai/skills/scorecard-marketing[0m
+
+[38;5;145msanky369/vibe-building-skills@lead-magnet[0m [36m25 installs[0m
+[38;5;102m└ https://skills.sh/sanky369/vibe-building-skills/lead-magnet[0m
+
+[38;5;145mwondelai/skills@one-page-marketing[0m [36m18 installs[0m
+[38;5;102m└ https://skills.sh/wondelai/skills/one-page-marketing[0m
+
+[38;5;145mvamseeachanta/workspace-hub@lead-generation[0m [36m10 installs[0m
+[38;5;102m└ https://skills.sh/vamseeachanta/workspace-hub/lead-generation[0m
+

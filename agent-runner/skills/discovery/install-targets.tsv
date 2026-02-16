@@ -1,0 +1,33 @@
+meta	find-skills	vercel-labs/skills@find-skills
+engineering	frontend architecture	404kidwiz/claude-supercode-skills@fullstack-developer
+engineering	backend api design	modu-ai/moai-adk@moai-domain-backend
+engineering	typescript	wshobson/agents@typescript-advanced-types
+engineering	react performance	nickcrew/claude-ctx-plugin@react-performance-optimization
+engineering	testing strategy	vasilyu1983/ai-agents-public@qa-testing-strategy
+engineering	devops ci cd	pulumi/agent-skills@pulumi-cdk-to-pulumi
+engineering	database optimization	jeffallan/claude-skills@database-optimizer
+engineering	system design	ruvnet/claude-flow@agent-architecture
+tech	ai sdk	vercel/ai@ai-sdk
+tech	mcp server	figma/mcp-server-guide@implement-design
+tech	openai api	jezweb/claude-skills@openai-api
+tech	nextjs	wshobson/agents@nextjs-app-router-patterns
+tech	security audit	waynesutton/convexskills@convex-security-audit
+tech	cloud deployment	wshobson/agents@multi-cloud-architecture
+tech	observability	wshobson/agents@service-mesh-observability
+tech	automation workflow	sickn33/antigravity-awesome-skills@github-workflow-automation
+sales	lead generation	apify/agent-skills@apify-lead-generation
+sales	cold outreach	anthropics/knowledge-work-plugins@draft-outreach
+sales	sales discovery	refoundai/lenny-skills@sales-qualification
+sales	objection handling	shipshitdev/library@constraint-eliminator
+sales	pipeline management	eddiebe147/claude-settings@sales
+sales	crm workflow	composiohq/awesome-claude-skills@zoho-crm-automation
+sales	proposal writing	ailabs-393/ai-labs-claude-skills@business-document-generator
+sales	closing deals	onewave-ai/claude-skills@pipeline-health-analyzer
+marketing	content strategy	coreyhaines31/marketingskills@content-strategy
+marketing	seo audit	coreyhaines31/marketingskills@seo-audit
+marketing	copywriting	coreyhaines31/marketingskills@copywriting
+marketing	paid ads	coreyhaines31/marketingskills@paid-ads
+marketing	email marketing	coreyhaines31/marketingskills@email-sequence
+marketing	brand messaging	wondelai/skills@storybrand-messaging
+marketing	product marketing	coreyhaines31/marketingskills@product-marketing-context
+marketing	growth experiments	daffy0208/ai-dev-standards@growth-experimenter

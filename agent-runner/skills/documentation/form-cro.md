@@ -1,2 +1,0 @@
-Email
-[name@company.com]

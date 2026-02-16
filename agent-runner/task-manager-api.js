@@ -648,6 +648,12 @@ class TaskManagerAPI {
     return this._post('/projects', data);
   }
 
+  // ========== TEAMS ==========
+
+  async getAllTeams() {
+    return this._get('/teams');
+  }
+
   // ========== AGENTS ==========
 
   async getAllAgents() {
@@ -660,12 +666,12 @@ class TaskManagerAPI {
 
   // ========== SPECIALISTS ==========
 
-  async getAllSpecialists() {
-    return this._get('/specialists');
+  async getAllEmployees() {
+    return this._get('/employees');
   }
 
-  async createSpecialist(data) {
-    return this._post('/specialists', data);
+  async createEmployee(data) {
+    return this._post('/employees', data);
   }
 
   // ========== CTO INTELLIGENCE LAYER ==========
@@ -696,11 +702,35 @@ class TaskManagerAPI {
     }
   }
 
+  async recordUsageEvent(event) {
+    try {
+      return await this._post('/usage/events', event);
+    } catch (error) {
+      console.error('[API] Error recording usage event:', error.message);
+      throw error;
+    }
+  }
+
+  async getUsageSummary({ projectId, teamId, taskId, hours = 24, provider = null } = {}) {
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    if (teamId) params.set('team_id', teamId);
+    if (taskId) params.set('task_id', taskId);
+    if (provider) params.set('provider', provider);
+    if (hours) params.set('hours', String(hours));
+    try {
+      return await this._get(`/usage/summary?${params.toString()}`);
+    } catch (error) {
+      console.error('[API] Error fetching usage summary:', error.message);
+      throw error;
+    }
+  }
+
   /**
-   * Get tools assigned to a specialist (with config)
+   * Get tools assigned to an employee (with config)
    */
-  async getSpecialistTools(specialistId) {
-    return this._get(`/specialists/${specialistId}/tools`);
+  async getEmployeeTools(employeeId) {
+    return this._get(`/employees/${employeeId}/tools`);
   }
 
   // ========== PRIVATE HELPERS ==========

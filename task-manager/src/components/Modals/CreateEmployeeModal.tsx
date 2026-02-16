@@ -7,7 +7,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { EmployeeTemplate } from '@/data/employeeTemplates';
-import { SKILL_POOL, getSkillsByCategory } from '@/data/skills';
 
 interface CreateEmployeeModalProps {
   isOpen: boolean;
@@ -27,8 +26,8 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showAllSkills, setShowAllSkills] = useState(false);
   const [suggestedSkills, setSuggestedSkills] = useState<string[]>([]);
-
-  const skillsByCategory = getSkillsByCategory();
+  const [skills, setSkills] = useState<any[]>([]);
+  const [skillsByCategory, setSkillsByCategory] = useState<Record<string, any[]>>({});
 
   // AI Auto-suggestion logic
   const analyzeSkills = useCallback(async (currentName: string, currentDesc: string) => {
@@ -83,6 +82,32 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, template]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const fetchSkills = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_URL}/skills`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : [];
+        setSkills(list);
+        const grouped = list.reduce((acc: Record<string, any[]>, skill: any) => {
+          const category = skill.category || 'General';
+          if (!acc[category]) acc[category] = [];
+          acc[category].push(skill);
+          return acc;
+        }, {});
+        setSkillsByCategory(grouped);
+      } catch (err) {
+        console.error('Failed to load skills', err);
+      }
+    };
+    fetchSkills();
+  }, [isOpen]);
 
   // Debounce description changes for analysis
   useEffect(() => {
@@ -157,10 +182,11 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="relative w-full max-w-2xl z-10"
+            className="relative w-full max-w-5xl z-10"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="glass-card-dark p-6 glow-border max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_25px_60px_rgba(0,0,0,0.35)] max-h-[92vh] overflow-hidden">
+              <div className="absolute -right-24 -top-28 h-64 w-64 rounded-full bg-teal-500/10 blur-3xl" />
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
@@ -179,7 +205,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-6">
+              <form onSubmit={handleSubmit} className="space-y-6 relative z-10">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">Employee Class</label>
@@ -188,7 +214,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                       onChange={(e) => setName(e.target.value)}
                       placeholder="e.g. React Expert, SQL Optimizer"
                       required
-                      className="bg-secondary border-0"
+                      className="bg-slate-900/70 border border-teal-500/20"
                     />
                   </div>
 
@@ -198,7 +224,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       placeholder="What is their primary responsibility?"
-                      className="bg-secondary border-0"
+                      className="bg-slate-900/70 border border-teal-500/20"
                     />
                   </div>
                 </div>
@@ -211,7 +237,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                     placeholder="Provide specific instructions for this employee..."
                     rows={4}
                     required
-                    className="bg-secondary border-0 resize-none text-sm italic"
+                    className="bg-slate-900/70 border border-teal-500/20 resize-none text-sm italic"
                   />
                 </div>
 
@@ -221,11 +247,11 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                       <Wrench className="w-4 h-4 text-primary" />
                       {suggestedSkills.length > 0 && !showAllSkills ? 'Essential Skills' : 'Specialized Skills'}
                       {suggestedSkills.length > 0 && !showAllSkills && (
-                        <span className="text-xs text-primary font-normal">({suggestedSkills.length} suggested)</span>
+                        <span className="text-xs text-teal-200/80 font-normal">({suggestedSkills.length} suggested)</span>
                       )}
                     </label>
                     {isAnalyzing && (
-                      <div className="flex items-center gap-2 text-xs text-primary animate-pulse">
+                      <div className="flex items-center gap-2 text-xs text-teal-200/80 animate-pulse">
                         <Loader2 className="w-3 h-3 animate-spin" />
                         AI is analyzing requirements...
                       </div>
@@ -235,7 +261,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                   {/* Show suggested skills only (when available and not showing all) */}
                   {suggestedSkills.length > 0 && !showAllSkills ? (
                     <div className="space-y-4">
-                      <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+                      <div className="rounded-2xl border border-teal-500/25 bg-slate-900/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                         <div className="flex items-center gap-2 mb-3">
                           <Sparkles className="w-4 h-4 text-primary" />
                           <p className="text-xs text-muted-foreground">
@@ -244,7 +270,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                           {suggestedSkills.map(skillId => {
-                            const skill = SKILL_POOL.find(s => s.id === skillId);
+                            const skill = skills.find(s => s.id === skillId);
                             if (!skill) return null;
                             return (
                               <div key={skill.id} className="flex items-center space-x-2">
@@ -257,7 +283,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                                 <label
                                   htmlFor={skill.id}
                                   className={`text-[11px] cursor-pointer select-none transition-colors ${
-                                    selectedTools.includes(skill.id) ? 'text-primary font-medium' : 'text-muted-foreground'
+                                    selectedTools.includes(skill.id) ? 'text-teal-200 font-medium' : 'text-muted-foreground'
                                   }`}
                                   title={skill.description}
                                 >
@@ -272,9 +298,9 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                         type="button"
                         variant="outline"
                         onClick={() => setShowAllSkills(true)}
-                        className="w-full text-xs"
+                        className="w-full text-xs border-teal-500/30 text-teal-100 hover:bg-teal-500/10"
                       >
-                        Show all {SKILL_POOL.length} skills
+                        Show all {skills.length} skills
                       </Button>
                     </div>
                   ) : (
@@ -296,7 +322,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                           <h4 className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 px-1">
                             {category}
                           </h4>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-secondary/20 p-3 rounded-lg border border-white/5">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-900/60 p-3 rounded-2xl border border-teal-500/20">
                             {skills.map(skill => (
                               <div key={skill.id} className="flex items-center space-x-2">
                                 <Checkbox
@@ -308,7 +334,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                                 <label
                                   htmlFor={skill.id}
                                   className={`text-[11px] cursor-pointer select-none transition-colors ${
-                                    selectedTools.includes(skill.id) ? 'text-primary font-medium' : 'text-muted-foreground'
+                                    selectedTools.includes(skill.id) ? 'text-teal-200 font-medium' : 'text-muted-foreground'
                                   }`}
                                   title={skill.description}
                                 >
@@ -323,11 +349,11 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess, template }: Cr
                   )}
                 </div>
 
-                <div className="flex gap-3 pt-4 border-t border-white/5">
+                <div className="flex gap-3 pt-4 border-t border-teal-500/20">
                   <Button type="button" variant="outline" onClick={onClose} className="flex-1">
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={isSubmitting} className="flex-1 bg-primary hover:bg-primary/90">
+                  <Button type="submit" disabled={isSubmitting} className="flex-1 bg-teal-400 text-slate-900 hover:bg-teal-300">
                     {isSubmitting ? 'Hiring...' : 'Hire Employee'}
                   </Button>
                 </div>

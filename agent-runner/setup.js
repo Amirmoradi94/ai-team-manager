@@ -58,16 +58,16 @@ class EnvironmentSetup {
 
   /**
    * Inject dynamic configuration for specific tools before execution
-   * e.g. Updating Claude's allowed_tools list based on the Specialist definition
+   * e.g. Updating Claude's allowed_tools list based on the Employee definition
    */
-  async configureToolProfile(provider, identity, specialists) {
+  async configureToolProfile(provider, identity, employees) {
     if (provider === 'claude') {
-      await this._configureClaude(identity, specialists);
+      await this._configureClaude(identity, employees);
     }
     // Add handlers for other providers
   }
 
-  async _configureClaude(identity, specialists) {
+  async _configureClaude(identity, employees) {
     // Example: Create a temporary config file or update the global one
     // Ideally, we avoid touching global config to prevent conflicts
     // Instead, we might rely on the prompt to constrain behavior

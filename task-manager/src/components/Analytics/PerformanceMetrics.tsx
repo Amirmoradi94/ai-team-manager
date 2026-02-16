@@ -88,10 +88,13 @@ export function PerformanceMetrics({ tasks }: PerformanceMetricsProps) {
         {metrics.map((metric) => {
           const Icon = metric.icon;
           return (
-            <div key={metric.title} className="glass-card p-6">
+            <div
+              key={metric.title}
+              className="rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-6 shadow-[0_20px_50px_rgba(0,0,0,0.25)]"
+            >
               <div className="flex items-start justify-between mb-4">
-                <div className={`p-3 rounded-lg ${metric.bgColor}`}>
-                  <Icon className={`w-6 h-6 ${metric.color}`} />
+                <div className="p-3 rounded-xl bg-slate-900/60 border border-teal-500/20">
+                  <Icon className="w-6 h-6 text-teal-200" />
                 </div>
                 {metric.trend && (
                   <div className={`flex items-center gap-1 ${
@@ -106,7 +109,7 @@ export function PerformanceMetrics({ tasks }: PerformanceMetricsProps) {
                 )}
               </div>
               <div className="text-3xl font-bold text-foreground mb-1">{metric.value}</div>
-              <div className="text-sm text-muted-foreground mb-1">{metric.title}</div>
+              <div className="text-xs uppercase tracking-widest text-teal-200/70 mb-1">{metric.title}</div>
               {metric.subtitle && (
                 <div className="text-xs text-muted-foreground">{metric.subtitle}</div>
               )}
@@ -116,17 +119,17 @@ export function PerformanceMetrics({ tasks }: PerformanceMetricsProps) {
       </div>
 
       {/* KPI Cards */}
-      <div className="glass-card p-6">
+      <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-6 shadow-[0_20px_50px_rgba(0,0,0,0.25)]">
         <h3 className="text-lg font-semibold text-foreground mb-4">Key Performance Indicators</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {kpis.map((kpi) => (
-            <div key={kpi.label} className="text-center p-4 rounded-lg bg-secondary/30">
+            <div key={kpi.label} className="text-center p-4 rounded-xl border border-teal-500/20 bg-slate-900/60">
               <div className={`text-2xl font-bold mb-1 ${
                 kpi.isGood ? 'text-success' : 'text-warning'
               }`}>
                 {kpi.value}
               </div>
-              <div className="text-xs text-muted-foreground">{kpi.label}</div>
+              <div className="text-xs uppercase tracking-widest text-teal-200/70">{kpi.label}</div>
               <div className={`mt-2 w-2 h-2 rounded-full mx-auto ${
                 kpi.isGood ? 'bg-success' : 'bg-warning'
               }`} />

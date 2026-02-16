@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145mcoreyhaines31/marketingskills@product-marketing-context[0m [36m9K installs[0m
+[38;5;102m└ https://skills.sh/coreyhaines31/marketingskills/product-marketing-context[0m
+
+[38;5;145mdavila7/claude-code-templates@marketing-strategy-pmm[0m [36m233 installs[0m
+[38;5;102m└ https://skills.sh/davila7/claude-code-templates/marketing-strategy-pmm[0m
+
+[38;5;145mdavila7/claude-code-templates@marketing-ideas[0m [36m187 installs[0m
+[38;5;102m└ https://skills.sh/davila7/claude-code-templates/marketing-ideas[0m
+
+[38;5;145mvasilyu1983/ai-agents-public@marketing-product-analytics[0m [36m36 installs[0m
+[38;5;102m└ https://skills.sh/vasilyu1983/ai-agents-public/marketing-product-analytics[0m
+
+[38;5;145movachiever/droid-tings@marketing-strategy-pmm[0m [36m19 installs[0m
+[38;5;102m└ https://skills.sh/ovachiever/droid-tings/marketing-strategy-pmm[0m
+
+[38;5;145msanky369/vibe-building-skills@product-photography[0m [36m14 installs[0m
+[38;5;102m└ https://skills.sh/sanky369/vibe-building-skills/product-photography[0m
+

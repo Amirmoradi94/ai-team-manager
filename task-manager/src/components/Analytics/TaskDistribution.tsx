@@ -37,7 +37,7 @@ export function TaskDistribution({ tasks }: TaskDistributionProps) {
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="glass-card-dark p-3 border border-border">
+        <div className="rounded-xl border border-teal-500/30 bg-slate-900/95 p-3 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
           <p className="text-sm font-medium text-foreground">{payload[0].name}</p>
           <p className="text-sm text-muted-foreground">
             {payload[0].value} tasks ({Math.round((payload[0].value / tasks.length) * 100)}%)
@@ -51,7 +51,7 @@ export function TaskDistribution({ tasks }: TaskDistributionProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {/* Status Distribution */}
-      <div className="glass-card p-6">
+      <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-6 shadow-[0_20px_50px_rgba(0,0,0,0.25)]">
         <h3 className="text-lg font-semibold text-foreground mb-4">Tasks by Status</h3>
         <ResponsiveContainer width="100%" height={250}>
           <PieChart>
@@ -83,12 +83,12 @@ export function TaskDistribution({ tasks }: TaskDistributionProps) {
       </div>
 
       {/* Priority Distribution */}
-      <div className="glass-card p-6">
+      <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-6 shadow-[0_20px_50px_rgba(0,0,0,0.25)]">
         <h3 className="text-lg font-semibold text-foreground mb-4">Tasks by Priority</h3>
         <ResponsiveContainer width="100%" height={250}>
           <BarChart data={priorityData}>
-            <XAxis dataKey="name" stroke="#64748b" style={{ fontSize: '12px' }} />
-            <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
+            <XAxis dataKey="name" stroke="#7dd3fc" style={{ fontSize: '12px' }} />
+            <YAxis stroke="#7dd3fc" style={{ fontSize: '12px' }} />
             <Tooltip content={<CustomTooltip />} />
             <Bar dataKey="value" radius={[8, 8, 0, 0]}>
               {priorityData.map((entry, index) => (

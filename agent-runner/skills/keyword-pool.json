@@ -1,0 +1,62 @@
+{
+  "engineering": [
+    "frontend architecture",
+    "backend api design",
+    "typescript",
+    "react performance",
+    "testing strategy",
+    "devops ci cd",
+    "database optimization",
+    "system design",
+    "microservices architecture",
+    "code review best practices",
+    "api versioning strategy",
+    "performance profiling",
+    "technical debt refactoring"
+  ],
+  "tech": [
+    "ai sdk",
+    "mcp server",
+    "openai api",
+    "nextjs",
+    "security audit",
+    "cloud deployment",
+    "observability",
+    "automation workflow",
+    "kubernetes operations",
+    "infrastructure as code",
+    "event driven architecture",
+    "authentication authorization",
+    "monitoring alerting"
+  ],
+  "sales": [
+    "lead generation",
+    "cold outreach",
+    "sales discovery",
+    "objection handling",
+    "pipeline management",
+    "crm workflow",
+    "proposal writing",
+    "closing deals",
+    "account based selling",
+    "sales enablement",
+    "follow up cadence",
+    "b2b prospecting",
+    "deal qualification"
+  ],
+  "marketing": [
+    "content strategy",
+    "seo audit",
+    "copywriting",
+    "paid ads",
+    "email marketing",
+    "brand messaging",
+    "product marketing",
+    "growth experiments",
+    "conversion rate optimization",
+    "social media strategy",
+    "landing page optimization",
+    "go to market strategy",
+    "customer segmentation"
+  ]
+}

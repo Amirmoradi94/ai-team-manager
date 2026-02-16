@@ -222,7 +222,7 @@ You are professional, thorough, and committed to excellence.`;
             name: leadName,
             system_prompt: leadPrompt
           },
-          specialist_ids: selectedEmployees
+          employee_ids: selectedEmployees
         })
       });
 
@@ -264,49 +264,53 @@ You are professional, thorough, and committed to excellence.`;
             className="relative w-full max-w-2xl z-10"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="glass-card-dark p-6 glow-border">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-                  <Users className="w-5 h-5 text-primary" />
-                  {editingTeam ? `Edit Team (Step ${step}/3)` : `Create New Team (Step ${step}/3)`}
-                </h2>
+            <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/80 via-slate-900/50 to-teal-900/30 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+              <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-teal-500/15 blur-3xl" />
+              <div className="flex items-center justify-between mb-6 relative z-10">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-teal-200/80">Command Unit</p>
+                  <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+                    <Users className="w-5 h-5 text-teal-200" />
+                    {editingTeam ? `Edit Team (Step ${step}/3)` : `Create New Team (Step ${step}/3)`}
+                  </h2>
+                </div>
                 <button
                   onClick={onClose}
-                  className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+                  className="p-2 rounded-lg border border-transparent hover:border-teal-500/40 hover:bg-slate-900/60 transition-colors text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               {step === 1 && (
-                <div className="space-y-5">
-                  <h3 className="text-lg font-medium">Team Identity & Scope</h3>
+                <div className="space-y-5 relative z-10">
+                  <h3 className="text-lg font-medium text-foreground">Team Identity & Scope</h3>
 
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Team Name</label>
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">Team Name</label>
                     <Input
                       value={teamName}
                       onChange={(e) => setTeamName(e.target.value)}
                       placeholder="e.g. Digital Marketing Squad"
-                      className="bg-secondary border-0"
+                      className="bg-slate-900/70 border border-teal-500/20"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Mission Statement</label>
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">Mission Statement</label>
                     <div className="relative group">
                       <Textarea
                         value={mission}
                         onChange={(e) => setMission(e.target.value)}
                         placeholder="What is this team's north star?"
-                        className="bg-secondary border-0 min-h-[120px] pr-10 pb-10"
+                        className="bg-slate-900/70 border border-teal-500/20 min-h-[120px] pr-10 pb-10"
                       />
                       <button
                         type="button"
                         onClick={() => handleEnhance('mission')}
                         disabled={isEnhancing !== null}
                         title="Enhance with AI"
-                        className="absolute bottom-3 right-3 p-2 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all duration-200 opacity-70 group-hover:opacity-100 disabled:opacity-50 border border-primary/20"
+                        className="absolute bottom-3 right-3 p-2 rounded-full bg-teal-500/10 text-teal-200 hover:bg-teal-500 hover:text-slate-900 transition-all duration-200 opacity-70 group-hover:opacity-100 disabled:opacity-50 border border-teal-500/30"
                       >
                         {isEnhancing === 'mission' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                       </button>
@@ -314,7 +318,7 @@ You are professional, thorough, and committed to excellence.`;
                   </div>
 
                   <div className="flex justify-end pt-4">
-                    <Button onClick={() => setStep(2)} disabled={!teamName}>
+                    <Button onClick={() => setStep(2)} disabled={!teamName} className="bg-teal-500/90 hover:bg-teal-500 text-slate-900">
                       Next: Define Lead
                     </Button>
                   </div>
@@ -322,22 +326,22 @@ You are professional, thorough, and committed to excellence.`;
               )}
 
               {step === 2 && (
-                <div className="space-y-5">
-                  <h3 className="text-lg font-medium">Team Lead (Main AI Agent)</h3>
+                <div className="space-y-5 relative z-10">
+                  <h3 className="text-lg font-medium text-foreground">Team Lead (Main AI Agent)</h3>
 
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Lead Name</label>
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">Lead Name</label>
                     <Input
                       value={leadName}
                       onChange={(e) => setLeadName(e.target.value)}
                       placeholder="e.g. Chief Growth Officer"
-                      className="bg-secondary border-0"
+                      className="bg-slate-900/70 border border-teal-500/20"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2 flex items-center gap-2">
-                      <Brain className="w-4 h-4 text-primary" />
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2 flex items-center gap-2">
+                      <Brain className="w-4 h-4 text-teal-200" />
                       System Prompt (Expertise)
                     </label>
                     <div className="relative group">
@@ -346,14 +350,14 @@ You are professional, thorough, and committed to excellence.`;
                         onChange={(e) => setLeadPrompt(e.target.value)}
                         placeholder="A sample system prompt will be auto-generated. You can modify it or use AI enhancement ✨"
                         rows={6}
-                        className="bg-secondary border-0 resize-none pr-10 pb-10"
+                        className="bg-slate-900/70 border border-teal-500/20 resize-none pr-10 pb-10"
                       />
                       <button
                         type="button"
                         onClick={() => handleEnhance('identity')}
                         disabled={isEnhancing !== null}
                         title="Enhance with AI"
-                        className="absolute bottom-3 right-3 p-2 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all duration-200 opacity-70 group-hover:opacity-100 disabled:opacity-50 border border-primary/20"
+                        className="absolute bottom-3 right-3 p-2 rounded-full bg-teal-500/10 text-teal-200 hover:bg-teal-500 hover:text-slate-900 transition-all duration-200 opacity-70 group-hover:opacity-100 disabled:opacity-50 border border-teal-500/30"
                       >
                         {isEnhancing === 'identity' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                       </button>
@@ -361,8 +365,8 @@ You are professional, thorough, and committed to excellence.`;
                   </div>
 
                   <div className="flex justify-between pt-4">
-                    <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
-                    <Button onClick={() => setStep(3)} disabled={!leadName || !leadPrompt}>
+                    <Button variant="outline" onClick={() => setStep(1)} className="border border-teal-500/30 bg-slate-900/70 text-teal-100 hover:border-teal-300/70">Back</Button>
+                    <Button onClick={() => setStep(3)} disabled={!leadName || !leadPrompt} className="bg-teal-500/90 hover:bg-teal-500 text-slate-900">
                       Next: Add Employees
                     </Button>
                   </div>
@@ -370,19 +374,19 @@ You are professional, thorough, and committed to excellence.`;
               )}
 
               {step === 3 && (
-                <div className="space-y-5">
+                <div className="space-y-5 relative z-10">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-lg font-medium flex items-center gap-2">
                         Team Composition
                         {suggestedEmployees.length > 0 && !showAllEmployees && (
-                          <span className="text-xs text-primary font-normal">({suggestedEmployees.length} recommended)</span>
+                          <span className="text-xs text-teal-200/80 font-normal">({suggestedEmployees.length} recommended)</span>
                         )}
                       </h3>
                       <p className="text-sm text-muted-foreground">Select the employees this team can call upon.</p>
                     </div>
                     {isAnalyzingEmployees && (
-                      <div className="flex items-center gap-2 text-xs text-primary animate-pulse">
+                      <div className="flex items-center gap-2 text-xs text-teal-200 animate-pulse">
                         <Loader2 className="w-3 h-3 animate-spin" />
                         AI analyzing team needs...
                       </div>
@@ -392,9 +396,9 @@ You are professional, thorough, and committed to excellence.`;
                   {suggestedEmployees.length > 0 && !showAllEmployees ? (
                     // Show only suggested employees
                     <div className="space-y-3">
-                      <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
+                      <div className="bg-slate-900/70 border border-teal-500/30 rounded-xl p-3">
                         <div className="flex items-center gap-2 mb-3">
-                          <Sparkles className="w-4 h-4 text-primary" />
+                          <Sparkles className="w-4 h-4 text-teal-200" />
                           <p className="text-xs text-muted-foreground">
                             AI analyzed your team's mission and recommended these employees
                           </p>
@@ -403,16 +407,16 @@ You are professional, thorough, and committed to excellence.`;
                           {employees.filter(e => suggestedEmployees.includes(e.id)).map(spec => (
                             <div
                               key={spec.id}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                              className={`p-3 rounded-xl border cursor-pointer transition-all ${
                                 selectedEmployees.includes(spec.id)
-                                  ? 'bg-primary/10 border-primary'
-                                  : 'bg-secondary/50 border-border hover:border-primary/50'
+                                  ? 'bg-teal-500/10 border-teal-400'
+                                  : 'bg-slate-900/60 border-teal-500/20 hover:border-teal-400/60'
                               }`}
                               onClick={() => handleToggleEmployee(spec.id)}
                             >
                               <div className="flex items-center gap-2 mb-1">
                                 <Checkbox checked={selectedEmployees.includes(spec.id)} />
-                                <span className="font-medium text-sm">{spec.name}</span>
+                                <span className="font-medium text-sm text-foreground">{spec.name}</span>
                               </div>
                               <p className="text-xs text-muted-foreground line-clamp-2 pl-6">{spec.description}</p>
                             </div>
@@ -423,7 +427,7 @@ You are professional, thorough, and committed to excellence.`;
                         type="button"
                         variant="outline"
                         onClick={() => setShowAllEmployees(true)}
-                        className="w-full text-xs"
+                        className="w-full text-xs border border-teal-500/30 bg-slate-900/70 text-teal-100 hover:border-teal-300/70"
                       >
                         Show all {employees.length} employees
                       </Button>
@@ -436,7 +440,7 @@ You are professional, thorough, and committed to excellence.`;
                           type="button"
                           variant="outline"
                           onClick={() => setShowAllEmployees(false)}
-                          className="w-full text-xs"
+                          className="w-full text-xs border border-teal-500/30 bg-slate-900/70 text-teal-100 hover:border-teal-300/70"
                         >
                           <Sparkles className="w-3 h-3 mr-2" />
                           Show only recommended employees ({suggestedEmployees.length})
@@ -446,16 +450,16 @@ You are professional, thorough, and committed to excellence.`;
                         {employees.map(spec => (
                           <div
                             key={spec.id}
-                            className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                            className={`p-3 rounded-xl border cursor-pointer transition-all ${
                               selectedEmployees.includes(spec.id)
-                                ? 'bg-primary/10 border-primary'
-                                : 'bg-secondary/50 border-border hover:border-primary/50'
+                                ? 'bg-teal-500/10 border-teal-400'
+                                : 'bg-slate-900/60 border-teal-500/20 hover:border-teal-400/60'
                             }`}
                             onClick={() => handleToggleEmployee(spec.id)}
                           >
                             <div className="flex items-center gap-2 mb-1">
                               <Checkbox checked={selectedEmployees.includes(spec.id)} />
-                              <span className="font-medium text-sm">{spec.name}</span>
+                              <span className="font-medium text-sm text-foreground">{spec.name}</span>
                             </div>
                             <p className="text-xs text-muted-foreground line-clamp-2 pl-6">{spec.description}</p>
                           </div>
@@ -468,8 +472,8 @@ You are professional, thorough, and committed to excellence.`;
                   )}
 
                   <div className="flex justify-between pt-4">
-                    <Button variant="outline" onClick={() => setStep(2)}>Back</Button>
-                    <Button onClick={handleSubmit} disabled={isSubmitting} className="bg-primary hover:bg-primary/90 gap-2">
+                    <Button variant="outline" onClick={() => setStep(2)} className="border border-teal-500/30 bg-slate-900/70 text-teal-100 hover:border-teal-300/70">Back</Button>
+                    <Button onClick={handleSubmit} disabled={isSubmitting} className="bg-teal-500/90 hover:bg-teal-500 text-slate-900 gap-2">
                       <Rocket className="w-4 h-4" />
                       {isSubmitting
                         ? (editingTeam ? 'Saving Changes...' : 'Creating Team...')

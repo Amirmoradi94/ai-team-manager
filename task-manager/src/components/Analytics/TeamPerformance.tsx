@@ -39,10 +39,10 @@ export function TeamPerformance({ tasks, teamMembers }: TeamPerformanceProps) {
   const topPerformer = stats[0];
 
   return (
-    <div className="glass-card p-6">
+    <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-6 shadow-[0_20px_50px_rgba(0,0,0,0.25)]">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold text-foreground">Team Performance</h3>
-        <Trophy className="w-5 h-5 text-warning" />
+        <Trophy className="w-5 h-5 text-teal-200" />
       </div>
 
       <div className="space-y-4">
@@ -52,25 +52,25 @@ export function TeamPerformance({ tasks, teamMembers }: TeamPerformanceProps) {
           return (
             <div
               key={stat.user.id}
-              className={`p-4 rounded-lg border transition-all ${
+              className={`p-4 rounded-xl border transition-all ${
                 isTopPerformer
-                  ? 'border-warning/50 bg-warning/5'
-                  : 'border-border bg-secondary/30'
+                  ? 'border-teal-400/60 bg-teal-500/10'
+                  : 'border-teal-500/20 bg-slate-900/60'
               }`}
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <Avatar className="w-10 h-10">
-                    <AvatarImage src={stat.user.avatar} alt={stat.user.name} />
-                    <AvatarFallback className="bg-primary/10">
-                      {stat.user.name.split(' ').map(n => n[0]).join('')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-foreground">{stat.user.name}</span>
+                    <Avatar className="w-10 h-10">
+                      <AvatarImage src={stat.user.avatar} alt={stat.user.name} />
+                      <AvatarFallback className="bg-teal-500/20">
+                        {stat.user.name.split(' ').map(n => n[0]).join('')}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-foreground">{stat.user.name}</span>
                       {isTopPerformer && (
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-warning/20 text-warning border border-warning/30">
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-teal-500/20 text-teal-200 border border-teal-500/30">
                           Top Performer
                         </span>
                       )}
@@ -87,26 +87,26 @@ export function TeamPerformance({ tasks, teamMembers }: TeamPerformanceProps) {
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="text-center p-2 rounded bg-background/50">
+                <div className="text-center p-2 rounded bg-slate-900/60 border border-teal-500/20">
                   <div className="text-sm font-semibold text-foreground">{stat.totalAssigned}</div>
                   <div className="text-xs text-muted-foreground">Assigned</div>
                 </div>
-                <div className="text-center p-2 rounded bg-success/10">
-                  <div className="text-sm font-semibold text-success">{stat.completed}</div>
+                <div className="text-center p-2 rounded bg-emerald-500/10 border border-emerald-500/30">
+                  <div className="text-sm font-semibold text-emerald-300">{stat.completed}</div>
                   <div className="text-xs text-muted-foreground">Completed</div>
                 </div>
-                <div className="text-center p-2 rounded bg-info/10">
-                  <div className="text-sm font-semibold text-info">{stat.inProgress}</div>
+                <div className="text-center p-2 rounded bg-cyan-500/10 border border-cyan-500/30">
+                  <div className="text-sm font-semibold text-cyan-200">{stat.inProgress}</div>
                   <div className="text-xs text-muted-foreground">In Progress</div>
                 </div>
               </div>
 
               {/* Progress Bar */}
               <div className="mt-3">
-                <div className="w-full bg-secondary rounded-full h-2">
+                <div className="w-full bg-slate-900/60 rounded-full h-2 border border-teal-500/20">
                   <div
                     className={`h-2 rounded-full transition-all ${
-                      isTopPerformer ? 'bg-warning' : 'bg-primary'
+                      isTopPerformer ? 'bg-teal-400' : 'bg-teal-500/80'
                     }`}
                     style={{ width: `${stat.completionRate}%` }}
                   />

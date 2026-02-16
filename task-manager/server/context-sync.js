@@ -2,7 +2,7 @@
  * Context Sync Helper
  *
  * Triggers context manager updates when entities change.
- * Ensures mycompany/ directory stays synchronized with database.
+ * Ensures repo-local mycompany/ directory stays synchronized with database.
  */
 
 const { exec } = require('child_process');
@@ -88,7 +88,7 @@ class ContextSync {
     console.log(`[ContextSync] Task ${action}: ${taskId}`);
 
     // Only sync for significant changes
-    if (action === 'created' || action === 'assigned' || action === 'completed') {
+    if (action === 'created' || action === 'assigned' || action === 'completed' || action === 'deleted') {
       await this.triggerFullSync();
     }
   }

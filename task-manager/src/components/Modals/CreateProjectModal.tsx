@@ -142,51 +142,55 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
             className="relative w-full max-w-lg z-10"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="glass-card-dark p-6 glow-border max-h-[90vh] overflow-y-auto custom-scrollbar">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-                  <FolderKanban className="w-5 h-5 text-primary" />
-                  {editingProject ? 'Edit Project' : 'Create New Project'}
-                </h2>
+            <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/80 via-slate-900/50 to-teal-900/30 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] max-h-[90vh] overflow-y-auto custom-scrollbar">
+              <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-teal-500/15 blur-3xl" />
+              <div className="flex items-center justify-between mb-6 relative z-10">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-teal-200/80">Portfolio Entry</p>
+                  <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+                    <FolderKanban className="w-5 h-5 text-teal-200" />
+                    {editingProject ? 'Edit Project' : 'Create New Project'}
+                  </h2>
+                </div>
                 <button
                   onClick={onClose}
-                  className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+                  className="p-2 rounded-lg border border-transparent hover:border-teal-500/40 hover:bg-slate-900/60 transition-colors text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={handleSubmit} className="space-y-5 relative z-10">
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Project Name</label>
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">Project Name</label>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Mobile App, Backend API"
                     required
-                    className="bg-secondary border-0"
+                    className="bg-slate-900/70 border border-teal-500/20"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Description</label>
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">Description</label>
                   <Textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Briefly describe the project goals..."
                     rows={2}
-                    className="bg-secondary border-0 resize-none"
+                    className="bg-slate-900/70 border border-teal-500/20 resize-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Project Rules (Global Instructions)</label>
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">Project Rules (Global Instructions)</label>
                   <Textarea
                     value={globalRules}
                     onChange={(e) => setGlobalRules(e.target.value)}
                     placeholder="e.g. Always use Yarn, follow Airbnb style guide, no class components..."
                     rows={4}
-                    className="bg-secondary border-0 resize-none text-sm italic"
+                    className="bg-slate-900/70 border border-teal-500/20 resize-none text-sm italic"
                   />
                   <p className="mt-2 text-[10px] text-muted-foreground">
                     These rules are prepended to every agent session for this project.
@@ -194,8 +198,8 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
                 </div>
 
                 <div className="relative" ref={dropdownRef}>
-                  <label className="block text-sm font-medium text-foreground mb-2 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-primary" />
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2 flex items-center gap-2">
+                    <Users className="w-4 h-4 text-teal-200" />
                     Assign Teams (Optional)
                   </label>
 
@@ -203,7 +207,7 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
                   <button
                     type="button"
                     onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                    className="w-full bg-secondary border-0 rounded-lg p-3 text-sm text-foreground flex items-center justify-between hover:bg-secondary/80 transition-colors"
+                    className="w-full bg-slate-900/70 border border-teal-500/20 rounded-xl p-3 text-sm text-foreground flex items-center justify-between hover:border-teal-400/60 transition-colors"
                   >
                     <span className="text-muted-foreground">
                       {selectedTeams.length === 0
@@ -222,13 +226,13 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
                         return team ? (
                           <span
                             key={teamId}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded text-xs"
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-teal-500/10 text-teal-200 rounded-full text-xs border border-teal-500/30"
                           >
                             {team.name}
                             <button
                               type="button"
                               onClick={() => toggleTeam(teamId)}
-                              className="hover:bg-primary/20 rounded p-0.5"
+                              className="hover:bg-teal-500/20 rounded p-0.5"
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -240,7 +244,7 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
 
                   {/* Dropdown Menu */}
                   {isDropdownOpen && (
-                    <div className="absolute z-50 w-full mt-1 bg-secondary rounded-lg shadow-lg border border-border max-h-60 overflow-y-auto custom-scrollbar">
+                    <div className="absolute z-50 w-full mt-1 bg-slate-900/95 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.45)] border border-teal-500/30 max-h-60 overflow-y-auto custom-scrollbar">
                       {teams.length === 0 ? (
                         <div className="p-3 text-sm text-muted-foreground italic">
                           No teams available. Create teams first.
@@ -251,11 +255,11 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
                             key={team.id}
                             type="button"
                             onClick={() => toggleTeam(team.id)}
-                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-foreground hover:bg-primary/10 transition-colors"
+                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-foreground hover:bg-teal-500/20 transition-colors"
                           >
                             <span>{team.name}</span>
                             {selectedTeams.includes(team.id) && (
-                              <Check className="w-4 h-4 text-primary" />
+                              <Check className="w-4 h-4 text-teal-200" />
                             )}
                           </button>
                         ))
@@ -265,8 +269,8 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2 flex items-center gap-2">
-                    <Terminal className="w-4 h-4 text-primary" />
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-teal-200" />
                     Local Repository Path
                   </label>
                   <Input
@@ -274,15 +278,15 @@ export function CreateProjectModal({ isOpen, onClose, onSuccess, editingProject 
                     onChange={(e) => setRepoPath(e.target.value)}
                     placeholder="e.g. /Users/amir/projects/my-app"
                     required
-                    className="bg-secondary border-0 font-mono text-xs"
+                    className="bg-slate-900/70 border border-teal-500/20 font-mono text-xs"
                   />
                 </div>
 
                 <div className="flex gap-3 pt-4">
-                  <Button type="button" variant="outline" onClick={onClose} className="flex-1">
+                  <Button type="button" variant="outline" onClick={onClose} className="flex-1 border border-teal-500/30 bg-slate-900/70 text-teal-100 hover:border-teal-300/70">
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={isSubmitting} className="flex-1 bg-primary hover:bg-primary/90">
+                  <Button type="submit" disabled={isSubmitting} className="flex-1 bg-teal-500/90 hover:bg-teal-500 text-slate-900 font-semibold">
                     {isSubmitting ? 'Saving...' : (editingProject ? 'Update Project' : 'Create Project')}
                   </Button>
                 </div>

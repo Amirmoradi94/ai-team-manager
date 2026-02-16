@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145mbobmatnyc/claude-mpm-skills@kubernetes[0m [36m56 installs[0m
+[38;5;102m└ https://skills.sh/bobmatnyc/claude-mpm-skills/kubernetes[0m
+
+[38;5;145mnodnarbnitram/claude-code-extensions@kubernetes-operations[0m [36m20 installs[0m
+[38;5;102m└ https://skills.sh/nodnarbnitram/claude-code-extensions/kubernetes-operations[0m
+
+[38;5;145mancoleman/ai-design-components@operating-kubernetes[0m [36m9 installs[0m
+[38;5;102m└ https://skills.sh/ancoleman/ai-design-components/operating-kubernetes[0m
+
+[38;5;145mlaurigates/claude-plugins@kubernetes-operations[0m [36m7 installs[0m
+[38;5;102m└ https://skills.sh/laurigates/claude-plugins/kubernetes-operations[0m
+
+[38;5;145mchaterm/terminal-skills@kubectl-basics[0m [36m5 installs[0m
+[38;5;102m└ https://skills.sh/chaterm/terminal-skills/kubectl-basics[0m
+
+[38;5;145mproompteng/lab@kubernetes[0m [36m4 installs[0m
+[38;5;102m└ https://skills.sh/proompteng/lab/kubernetes[0m
+

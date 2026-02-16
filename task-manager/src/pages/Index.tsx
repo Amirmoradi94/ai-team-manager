@@ -120,6 +120,7 @@ const Index = () => {
     initAuth();
   }, []);
 
+
   // Fetch scheduled tasks when calendar tab is active or week changes
   useEffect(() => {
     if (activeTab === 'calendar') {
@@ -724,6 +725,10 @@ const Index = () => {
     </div>
   );
 
+  const backlogCount = (tasks || []).filter((t) => t.status === 'backlog').length;
+  const inProgressCount = (tasks || []).filter((t) => t.status === 'in-progress').length;
+  const reviewCount = (tasks || []).filter((t) => t.status === 'for-review').length;
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Background glow effects */}
@@ -772,38 +777,54 @@ const Index = () => {
 
         <div className="flex-1 overflow-auto p-6">
           {activeTab === 'dashboard' && (
-            <>
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mb-6"
-              >
-                <h2 className="text-2xl font-bold text-foreground mb-1">
-                  Good morning, {currentUser?.name?.split(' ')[0] || 'User'}! 👋
-                </h2>
-                <p className="text-muted-foreground">
-                  Here's what's happening with your projects today.
-                </p>
-              </motion.div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+              <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+                <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+                <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-bold text-foreground">
+                      Good morning, {currentUser?.name?.split(' ')[0] || 'User'}.
+                    </h2>
+                    <p className="text-sm text-muted-foreground">
+                      Here is your operational snapshot for today.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <div className="px-4 py-2 rounded-2xl border border-teal-500/30 bg-slate-900/60 text-xs font-bold uppercase tracking-widest text-teal-200">
+                      {backlogCount} backlog
+                    </div>
+                    <div className="px-4 py-2 rounded-2xl border border-amber-500/30 bg-slate-900/60 text-xs font-bold uppercase tracking-widest text-amber-200">
+                      {inProgressCount} in progress
+                    </div>
+                    <div className="px-4 py-2 rounded-2xl border border-violet-500/30 bg-slate-900/60 text-xs font-bold uppercase tracking-widest text-violet-200">
+                      {reviewCount} for review
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <StatsCards tasks={tasks} />
 
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
-              >
-                <h3 className="text-lg font-semibold text-foreground mb-4">Task Board</h3>
-                <TaskBoard
-                  tasks={filteredTasks}
-                  onAddTask={handleAddTask}
-                  onTaskClick={setSelectedTask}
-                  onTaskDelete={handleDeleteTask}
-                  onTaskMove={handleTaskMove}
-                  currentUser={currentUser}
-                />
-              </motion.div>
-            </>
+              <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+                <div className="absolute -left-24 -bottom-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-semibold text-foreground">Task Board</h3>
+                    <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                      {filteredTasks.length} active
+                    </span>
+                  </div>
+                  <TaskBoard
+                    tasks={filteredTasks}
+                    onAddTask={handleAddTask}
+                    onTaskClick={setSelectedTask}
+                    onTaskDelete={handleDeleteTask}
+                    onTaskMove={handleTaskMove}
+                    currentUser={currentUser}
+                  />
+                </div>
+              </div>
+            </motion.div>
           )}
 
           {activeTab === 'cto' && (
@@ -812,88 +833,108 @@ const Index = () => {
 
           {activeTab === 'projects' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-foreground">Projects</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {Array.isArray(projects) && projects.map(project => {
-                  const lastSeen = project.last_seen || project.creator_runner_last_seen;
-                  // SQLite uses YYYY-MM-DD HH:MM:SS in UTC. Append 'Z' and replace space with 'T' for reliable ISO parsing
-                  const isOnline = lastSeen && (Date.now() - new Date(lastSeen.replace(' ', 'T') + 'Z').getTime() < 60000);
-                  const connectCommand = `npx agent-runner connect --token=${project.runner_token} --url=${API_URL}`;
+              <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+                <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+                <div className="relative z-10">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.3em] text-teal-200/80">Portfolio Briefing</p>
+                      <h2 className="text-2xl font-bold text-foreground">Projects</h2>
+                      <p className="text-sm text-muted-foreground">Organize mission plans and keep teams aligned on execution.</p>
+                    </div>
+                    <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-teal-500/10 border border-teal-500/30 shadow-sm text-xs font-bold uppercase tracking-widest text-teal-200">
+                      {projects.length} active
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {Array.isArray(projects) && projects.map(project => {
+                      const lastSeen = project.last_seen || project.creator_runner_last_seen;
+                      // SQLite uses YYYY-MM-DD HH:MM:SS in UTC. Append 'Z' and replace space with 'T' for reliable ISO parsing
+                      const isOnline = lastSeen && (Date.now() - new Date(lastSeen.replace(' ', 'T') + 'Z').getTime() < 60000);
+                      const connectCommand = `npx agent-runner connect --token=${project.runner_token} --url=${API_URL}`;
 
-                  return (
-                    <div key={project.id} className="glass-card p-5 border-2 border-transparent hover:border-gradient transition-all duration-300 group relative flex flex-col bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-cyan-500/10 hover:from-emerald-500/15 hover:via-teal-500/15 hover:to-cyan-500/15 shadow-lg hover:shadow-2xl hover:shadow-emerald-500/20 rounded-xl">
-                      {/* Action buttons - top right */}
-                      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-2 z-10">
-                        <button
-                          onClick={() => setProjectAssigningTeams(project)}
-                          className="p-2 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-500 text-white hover:from-teal-600 hover:to-cyan-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
-                          title="Assign teams"
+                      return (
+                        <div
+                          key={project.id}
+                          className="group relative flex flex-col rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-300 hover:border-teal-500/40 hover:shadow-[0_25px_60px_rgba(20,184,166,0.2)]"
                         >
-                          <Users className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleEditProject(project)}
-                          className="p-2 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white hover:from-cyan-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
-                          title="Edit project"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteProject(project.id)}
-                          className="p-2 rounded-lg bg-gradient-to-br from-rose-500 to-red-500 text-white hover:from-rose-600 hover:to-red-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
-                          title="Delete project"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                          {/* Action buttons - top right */}
+                          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-2 z-10">
+                            <button
+                              onClick={() => setProjectAssigningTeams(project)}
+                              className="p-2 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-500 text-white hover:from-teal-600 hover:to-cyan-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                              title="Assign teams"
+                            >
+                              <Users className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleEditProject(project)}
+                              className="p-2 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white hover:from-cyan-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                              title="Edit project"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteProject(project.id)}
+                              className="p-2 rounded-lg bg-gradient-to-br from-rose-500 to-red-500 text-white hover:from-rose-600 hover:to-red-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                              title="Delete project"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
 
                       <div className="mb-3">
-                        <h3 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 bg-clip-text text-transparent group-hover:from-emerald-300 group-hover:via-teal-300 group-hover:to-cyan-300 transition-all pr-16">{capitalize(project.name)}</h3>
+                        <h3 className="text-xl font-bold bg-gradient-to-r from-teal-200 via-cyan-200 to-emerald-200 bg-clip-text text-transparent transition-all pr-16">{capitalize(project.name)}</h3>
                       </div>
-                      <h4 className="text-xs text-emerald-400 mb-2 uppercase font-bold tracking-wider flex items-center gap-1">
-                        <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <h4 className="text-xs text-teal-200/80 mb-2 uppercase font-bold tracking-wider flex items-center gap-1">
+                        <span className="w-1 h-1 rounded-full bg-teal-300 animate-pulse"></span>
                         Project Overview
                       </h4>
-                      <p className="text-base text-gray-200 mb-4 line-clamp-2 leading-relaxed">{project.description}</p>
+                      <p className="text-sm text-slate-200/90 mb-4 line-clamp-2 leading-relaxed">{project.description}</p>
 
                       <div className="space-y-3 mt-auto">
-                        <div className="flex items-center gap-3 text-sm bg-gradient-to-r from-teal-500/20 to-cyan-500/20 border-2 border-teal-400/30 p-3 rounded-lg backdrop-blur-sm hover:border-teal-400/50 transition-colors">
-                          <Terminal className="w-5 h-5 text-teal-400 flex-shrink-0 animate-pulse" />
-                          <code className="truncate text-teal-100 text-xs font-medium">{project.repository_path}</code>
+                        <div className="flex items-center gap-3 text-sm bg-slate-900/60 border border-teal-500/30 p-3 rounded-xl backdrop-blur-sm hover:border-teal-400/60 transition-colors">
+                          <Terminal className="w-5 h-5 text-teal-300 flex-shrink-0" />
+                          <code className="truncate text-teal-100/90 text-xs font-medium">{project.repository_path}</code>
                         </div>
 
                         {project.global_rules && (
-                          <div className="bg-gradient-to-br from-emerald-500/20 via-teal-500/20 to-cyan-500/20 border-2 border-emerald-400/40 rounded-lg p-4 backdrop-blur-sm hover:border-emerald-400/60 transition-colors">
-                            <p className="text-xs text-emerald-300 mb-2 uppercase font-bold tracking-wider flex items-center gap-1">
-                              <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>
+                          <div className="bg-slate-900/50 border border-teal-500/30 rounded-xl p-4 backdrop-blur-sm hover:border-teal-400/60 transition-colors">
+                            <p className="text-xs text-teal-200/80 mb-2 uppercase font-bold tracking-wider flex items-center gap-1">
+                              <span className="w-1 h-1 rounded-full bg-teal-300 animate-pulse"></span>
                               Global Rules
                             </p>
-                            <p className="text-sm text-gray-100 line-clamp-2 italic leading-relaxed">{project.global_rules}</p>
+                            <p className="text-sm text-slate-200/90 line-clamp-2 italic leading-relaxed">{project.global_rules}</p>
                           </div>
                         )}
 
-                        {/* Assigned Teams Badges */}
-                        {project.teams && project.teams.length > 0 && (
-                          <div className="flex flex-wrap gap-2 pt-2">
-                            {project.teams.map((team: any) => (
+                            {/* Assigned Teams Badges */}
+                            {project.teams && project.teams.length > 0 && (
+                              <div className="flex flex-wrap gap-2 pt-2">
+                                {project.teams.map((team: any) => (
                               <div
                                 key={team.id}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-200 border-2 border-cyan-400/40 hover:from-cyan-500/40 hover:to-blue-500/40 hover:border-cyan-400/60 transition-all hover:scale-105 shadow-sm"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold bg-teal-500/20 text-teal-100 border border-teal-400/40 hover:border-teal-300/70 transition-all shadow-sm"
                                 title={team.mission_statement || team.name}
                               >
                                 <Users className="w-3 h-3" />
                                 {team.name}
                               </div>
                             ))}
+                              </div>
+                            )}
                           </div>
-                        )}
+                        </div>
+                      );
+                    })}
+                    {projects.length === 0 && (
+                      <div className="col-span-full text-center py-12">
+                        <Terminal className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
+                        <p className="text-muted-foreground">No projects defined yet.</p>
                       </div>
-                    </div>
-                  );
-                })}
-                {projects.length === 0 && <p className="text-muted-foreground">No projects defined yet.</p>}
+                    )}
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
@@ -906,107 +947,119 @@ const Index = () => {
 
           {activeTab === 'team' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-foreground">Teams</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {Array.isArray(teams) && teams.map(team => (
-                  <div
-                    key={team.id}
-                    onClick={() => setSelectedTeamForDetail(team)}
-                    className="glass-card p-5 border-2 border-transparent hover:border-gradient transition-all duration-300 group relative cursor-pointer bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-cyan-500/10 hover:from-emerald-500/15 hover:via-teal-500/15 hover:to-cyan-500/15 shadow-lg hover:shadow-2xl hover:shadow-emerald-500/20 rounded-xl"
-                  >
-                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-2 z-10">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setTeamAssigningEmployees(team);
-                        }}
-                        className="p-2 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
-                        title="Assign AI employees"
-                      >
-                        <Cpu className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditTeam(team);
-                        }}
-                        className="p-2 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white hover:from-cyan-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
-                        title="Edit team"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteTeam(team.id);
-                        }}
-                        className="p-2 rounded-lg bg-gradient-to-br from-rose-500 to-red-500 text-white hover:from-rose-600 hover:to-red-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
-                        title="Delete team"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+              <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+                <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+                <div className="relative z-10">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.3em] text-teal-200/80">Command Units</p>
+                      <h2 className="text-2xl font-bold text-foreground">Teams</h2>
+                      <p className="text-sm text-muted-foreground">Assemble specialized squads and align leaders on mission outcomes.</p>
                     </div>
+                    <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-teal-500/10 border border-teal-500/30 shadow-sm text-xs font-bold uppercase tracking-widest text-teal-200">
+                      {teams.length} squads
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {Array.isArray(teams) && teams.map(team => (
+                      <div
+                        key={team.id}
+                        onClick={() => setSelectedTeamForDetail(team)}
+                        className="group relative cursor-pointer rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-300 hover:border-teal-500/40 hover:shadow-[0_25px_60px_rgba(20,184,166,0.2)]"
+                      >
+                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-2 z-10">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTeamAssigningEmployees(team);
+                            }}
+                            className="p-2 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                            title="Assign AI employees"
+                          >
+                            <Cpu className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditTeam(team);
+                            }}
+                            className="p-2 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white hover:from-cyan-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                            title="Edit team"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteTeam(team.id);
+                            }}
+                            className="p-2 rounded-lg bg-gradient-to-br from-rose-500 to-red-500 text-white hover:from-rose-600 hover:to-red-600 transition-all shadow-md hover:shadow-lg hover:scale-105"
+                            title="Delete team"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
 
                     <div className="flex items-center gap-3 mb-4">
-                      <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/30 to-teal-500/30 shadow-lg">
-                        <Users className="w-7 h-7 text-emerald-200" />
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-teal-500/30 shadow-lg">
+                        <Users className="w-7 h-7 text-teal-200" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-xl font-bold bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 bg-clip-text text-transparent group-hover:from-emerald-300 group-hover:via-teal-300 group-hover:to-cyan-300 transition-all truncate">{capitalize(team.name)}</h3>
+                        <h3 className="text-xl font-bold bg-gradient-to-r from-teal-200 via-cyan-200 to-emerald-200 bg-clip-text text-transparent transition-all truncate">{capitalize(team.name)}</h3>
                       </div>
                     </div>
 
-                    <p className="text-base text-gray-200 line-clamp-2 mb-4 h-12 leading-relaxed">{team.mission_statement}</p>
+                    <p className="text-sm text-slate-200/90 line-clamp-2 mb-4 h-12 leading-relaxed">{team.mission_statement}</p>
 
                     {/* Team Composition */}
-                    <div className="space-y-3 border-t-2 border-gradient pt-4">
+                    <div className="space-y-3 border-t border-teal-500/20 pt-4">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0 flex-1 bg-gradient-to-r from-teal-500/20 to-cyan-500/20 border-2 border-teal-400/30 rounded-lg p-2 backdrop-blur-sm">
-                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-md">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1 bg-slate-900/60 border border-teal-500/30 rounded-xl p-2 backdrop-blur-sm">
+                          <div className="w-7 h-7 rounded-full bg-teal-500/30 border border-teal-400/40 flex items-center justify-center flex-shrink-0 shadow-md">
                             <Bot className="w-4 h-4 text-white" />
                           </div>
-                          <p className="text-sm font-bold text-teal-200 truncate">
+                          <p className="text-sm font-bold text-teal-100 truncate">
                             {team.lead?.name ? capitalize(team.lead.name) : 'No Lead'}
                           </p>
                         </div>
 
-                        {team.employees && team.employees.length > 0 && (
-                          <div className="flex -space-x-2 overflow-hidden px-1">
-                            <TooltipProvider>
-                              {team.employees.slice(0, 3).map((spec: any) => (
-                                <Tooltip key={spec.id}>
-                                  <TooltipTrigger asChild>
-                                    <div className="inline-flex items-center justify-center w-7 h-7 rounded-full border-2 border-background bg-gradient-to-br from-emerald-500 to-teal-500 text-[10px] font-bold text-white hover:scale-110 transition-all cursor-help shadow-md">
-                                      {spec.name.charAt(0).toUpperCase()}
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p className="text-xs font-semibold">{capitalize(spec.name)}</p>
-                                    <p className="text-[10px] text-muted-foreground">{spec.description}</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              ))}
-                              {team.employees.length > 3 && (
-                                <div className="inline-flex items-center justify-center w-7 h-7 rounded-full border-2 border-background bg-gradient-to-br from-cyan-500 to-blue-500 text-[9px] font-bold text-white shadow-md">
-                                  +{team.employees.length - 3}
-                                </div>
-                              )}
-                            </TooltipProvider>
+                            {team.employees && team.employees.length > 0 && (
+                              <div className="flex -space-x-2 overflow-hidden px-1">
+                                <TooltipProvider>
+                                  {team.employees.slice(0, 3).map((spec: any) => (
+                                    <Tooltip key={spec.id}>
+                                      <TooltipTrigger asChild>
+                                        <div className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-teal-500/40 bg-slate-900/60 text-[10px] font-bold text-teal-100 hover:scale-110 transition-all cursor-help shadow-md">
+                                          {spec.name.charAt(0).toUpperCase()}
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p className="text-xs font-semibold">{capitalize(spec.name)}</p>
+                                        <p className="text-[10px] text-muted-foreground">{spec.description}</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  ))}
+                                  {team.employees.length > 3 && (
+                                  <div className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-teal-500/40 bg-teal-500/20 text-[9px] font-bold text-teal-100 shadow-md">
+                                    +{team.employees.length - 3}
+                                  </div>
+                                )}
+                                </TooltipProvider>
+                              </div>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </div>
-                    </div>
+                    ))}
+                    {teams.length === 0 && (
+                      <div className="col-span-full text-center py-12">
+                        <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
+                        <p className="text-muted-foreground">No teams defined yet.</p>
+                        <p className="text-sm text-muted-foreground/70 mt-1">Click "Create Team" to define your first AI squad</p>
+                      </div>
+                    )}
                   </div>
-                ))}
-                {teams.length === 0 && (
-                  <div className="col-span-full text-center py-12">
-                    <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
-                    <p className="text-muted-foreground">No teams defined yet.</p>
-                    <p className="text-sm text-muted-foreground/70 mt-1">Click "Create Team" to define your first AI squad</p>
-                  </div>
-                )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -1018,7 +1071,10 @@ const Index = () => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {Array.isArray(employees) && employees.map(spec => (
-                  <div key={spec.id} className="glass-card p-5 border-2 border-transparent hover:border-gradient transition-all duration-300 relative group bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-cyan-500/10 hover:from-emerald-500/15 hover:via-teal-500/15 hover:to-cyan-500/15 shadow-lg hover:shadow-2xl hover:shadow-emerald-500/20 rounded-xl">
+                  <div
+                    key={spec.id}
+                    className="relative group rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-300 hover:border-teal-500/40 hover:shadow-[0_25px_60px_rgba(20,184,166,0.2)]"
+                  >
                     <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-1">
                       <button
                         onClick={() => deleteEmployee(spec.id)}
@@ -1029,17 +1085,22 @@ const Index = () => {
                       </button>
                     </div>
                     <div className="flex flex-col items-center gap-3 mb-3">
-                      <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/30 to-teal-500/30 shadow-lg">
-                        <Cpu className="w-6 h-6 text-emerald-200" />
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-teal-500/30 shadow-lg">
+                        <Cpu className="w-6 h-6 text-teal-200" />
                       </div>
-                      <h3 className="text-lg font-bold text-center bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 bg-clip-text text-transparent group-hover:from-emerald-300 group-hover:via-teal-300 group-hover:to-cyan-300 transition-all">{capitalize(spec.name)}</h3>
+                      <h3 className="text-lg font-bold text-center bg-gradient-to-r from-teal-200 via-cyan-200 to-emerald-200 bg-clip-text text-transparent transition-all">
+                        {capitalize(spec.name)}
+                      </h3>
                     </div>
-                    <p className="text-sm text-gray-200 text-center mb-4 h-12 line-clamp-2 leading-relaxed">{spec.description}</p>
-                    <div className="flex flex-wrap gap-1.5 pt-3 border-t-2 border-gradient justify-center">
+                    <p className="text-sm text-slate-200/90 text-center mb-4 h-12 line-clamp-2 leading-relaxed">{spec.description}</p>
+                    <div className="flex flex-wrap gap-1.5 pt-3 border-t border-teal-500/20 justify-center">
                       {(() => {
                         try {
                           return (JSON.parse(spec.tools || '[]')).map((tool: string) => (
-                            <span key={tool} className="text-[9px] px-2 py-1 rounded-full bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-200 border-2 border-cyan-400/30 uppercase font-bold hover:from-cyan-500/40 hover:to-blue-500/40 hover:border-cyan-400/50 transition-all hover:scale-105 shadow-sm">
+                            <span
+                              key={tool}
+                              className="text-[9px] px-2 py-1 rounded-full bg-teal-500/20 text-teal-100 border border-teal-400/40 uppercase font-bold transition-all shadow-sm"
+                            >
                               {tool.replace('_', ' ')}
                             </span>
                           ));
@@ -1107,7 +1168,14 @@ const Index = () => {
 
           {activeTab === 'analytics' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Analytics & Performance</h2>
+              <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)] mb-6">
+                <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+                <div className="relative z-10">
+                  <p className="text-xs font-bold uppercase tracking-[0.3em] text-teal-200/80">Operational Intelligence</p>
+                  <h2 className="text-2xl font-bold text-foreground">Analytics & Performance</h2>
+                  <p className="text-sm text-muted-foreground">Executive telemetry across tasks, teams, and throughput.</p>
+                </div>
+              </div>
               <Suspense fallback={<LoadingSpinner />}>
                 <AnalyticsDashboard tasks={tasks} teamMembers={teamMembers} />
               </Suspense>

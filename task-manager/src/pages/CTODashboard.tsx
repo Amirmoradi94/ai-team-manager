@@ -6,14 +6,12 @@ import {
   Activity,
   Zap,
   AlertTriangle,
-  CheckCircle2,
   XCircle,
   Clock,
   Settings,
   RefreshCw,
   Sparkles,
   Target,
-  Shield,
   Settings2,
   Gauge,
   ChevronDown,
@@ -33,6 +31,11 @@ interface CTOConfig {
   strategy?: 'aggressive' | 'balanced' | 'conservative';
   autonomyLevel?: 'full' | 'oversight';
   activeProviders?: string[];
+  costBudgets?: {
+    perTaskUsd?: number;
+    perTeamDailyUsd?: number;
+    perProjectWeeklyUsd?: number;
+  };
   models?: {
     preferredModels: string[];
   };
@@ -46,20 +49,45 @@ interface CTOConfig {
   deferWindowUsagePercent: number;
 }
 
-interface ResourceStatus {
-  claude: { remaining5h: number; remainingDay: number; available: boolean; source?: string };
-  gemini: { remaining5h: number; remainingDay: number; available: boolean; source?: string };
-  codex: { remaining5h: number; remainingDay: number; available: boolean; source?: string };
+interface UsageSummary {
+  hours: number;
+  project_id?: string | null;
+  team_id?: string | null;
+  task_id?: string | null;
+  provider?: string | null;
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  by_provider: Record<string, { total_cost_usd: number; total_input_tokens: number; total_output_tokens: number }>;
+  by_model: Record<string, { total_cost_usd: number; total_input_tokens: number; total_output_tokens: number }>;
+  by_actor_type?: Record<string, { total_cost_usd: number; total_input_tokens: number; total_output_tokens: number }>;
+}
+
+interface TopTaskRow {
+  task_id: string;
+  title: string;
+  status: string;
+  project_name: string;
+  team_name: string;
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  last_used_at: string;
 }
 
 export function CTODashboard() {
   const [config, setConfig] = useState<CTOConfig>({
     enabled: true,
     useAIForDecisions: true,
-    ctoProvider: 'gemini-3-pro',
+    ctoProvider: 'gemini-3-pro-preview',
     strategy: 'balanced',
     autonomyLevel: 'full',
     activeProviders: ['claude', 'gemini', 'codex'],
+    costBudgets: {
+      perTaskUsd: 2.5,
+      perTeamDailyUsd: 25,
+      perProjectWeeklyUsd: 120
+    },
     subscriptions: {
       claude: { plan: 'max5x' },
       gemini: { plan: 'ultra' },
@@ -69,9 +97,15 @@ export function CTODashboard() {
     splitComplexityScore: 45,
     deferWindowUsagePercent: 90
   });
-  const [resources, setResources] = useState<ResourceStatus | null>(null);
   const [activeTasks, setActiveTasks] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [allTasks, setAllTasks] = useState<any[]>([]);
+  const [usage24h, setUsage24h] = useState<UsageSummary | null>(null);
+  const [usage7d, setUsage7d] = useState<UsageSummary | null>(null);
+  const [topTasks, setTopTasks] = useState<TopTaskRow[]>([]);
+  const [warningTasks, setWarningTasks] = useState<any[]>([]);
+  const [usageFilters, setUsageFilters] = useState<{ teamId?: string; projectId?: string }>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -81,6 +115,10 @@ export function CTODashboard() {
     const interval = setInterval(fetchDashboardData, 10000); // Refresh every 10s
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [usageFilters.teamId, usageFilters.projectId]);
 
   const fetchDashboardData = async () => {
     try {
@@ -113,6 +151,15 @@ export function CTODashboard() {
         setTeams(data);
       }
 
+      // Fetch Projects
+      const projectsRes = await fetch(`${API_URL}/projects`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (projectsRes.ok) {
+        const data = await projectsRes.json();
+        setProjects(data);
+      }
+
       // Fetch active tasks
       const tasksRes = await fetch(`${API_URL}/runner/active-tasks`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -122,23 +169,48 @@ export function CTODashboard() {
         setActiveTasks(data);
       }
 
-      // Force refresh resource status on open
-      await fetch(`${API_URL}/cto/refresh-resources`, {
-        method: 'POST',
+      // Fetch warning tasks
+      const allTasksRes = await fetch(`${API_URL}/tasks`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      if (allTasksRes.ok) {
+        const data = await allTasksRes.json();
+        setAllTasks(data);
+        const warnings = data.filter((t: any) => {
+          if (!t.resource_metadata) return false;
+          try {
+            const meta = JSON.parse(t.resource_metadata);
+            return Boolean(meta?.cto_warning);
+          } catch {
+            return false;
+          }
+        });
+        setWarningTasks(warnings);
+      }
 
-      // Fetch real resource status from server
-      const resourceRes = await fetch(`${API_URL}/cto/resource-status`, {
+      // Fetch usage summaries
+      const teamParam = usageFilters.teamId ? `&team_id=${usageFilters.teamId}` : '';
+      const projectParam = usageFilters.projectId ? `&project_id=${usageFilters.projectId}` : '';
+      const usage24Res = await fetch(`${API_URL}/usage/summary?hours=24${teamParam}${projectParam}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (resourceRes.ok) {
-        const data = await resourceRes.json();
-        if (data && Object.keys(data).length > 0) {
-          setResources(data);
-        } else {
-          setResources(null);
-        }
+      if (usage24Res.ok) {
+        const data = await usage24Res.json();
+        setUsage24h(data);
+      }
+      const usage7Res = await fetch(`${API_URL}/usage/summary?hours=168${teamParam}${projectParam}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (usage7Res.ok) {
+        const data = await usage7Res.json();
+        setUsage7d(data);
+      }
+      const topRes = await fetch(`${API_URL}/usage/top-tasks?hours=168&limit=5${teamParam}${projectParam}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (topRes.ok) {
+        const data = await topRes.json();
+        setTopTasks(data.rows || []);
       }
     } catch (e) {
       console.error('Failed to fetch dashboard data:', e);
@@ -194,26 +266,25 @@ export function CTODashboard() {
     saveConfig({ ...config, activeProviders: newActive });
   };
 
-  const getResourceHealth = (provider: keyof ResourceStatus) => {
-    if (!resources) return 'unknown';
-    if (!config.activeProviders?.includes(provider)) return 'disabled';
-
-    const res = (resources as any)[provider];
-    if (!res) return 'unknown';
-
-    const plans: any = {
-      claude: { pro: 45, max5x: 225, max20x: 900 },
-      gemini: { pro: 100, ultra: 500 },
-      codex: { plus: 90, pro: 900 }
-    };
-    const planName = config.subscriptions[provider as keyof typeof config.subscriptions]?.plan || 'pro';
-    const max = plans[provider]?.[planName] || 100;
-
-    const usage = res.remaining5h > 0 ? ((1 - (res.remaining5h / max)) * 100) : 100;
-    if (usage > 90) return 'critical';
-    if (usage > 70) return 'warning';
-    return 'healthy';
+  const formatUsd = (value?: number | null) => {
+    if (value === null || value === undefined || Number.isNaN(value)) return '—';
+    return `$${value.toFixed(2)}`;
   };
+
+  const budgetStatusLine = (spent: number | null | undefined, budget: number | undefined) => {
+    if (budget === undefined || budget === null) return { text: 'No budget set', pct: 0 };
+    const safeSpent = spent || 0;
+    const pct = Math.min(100, (safeSpent / budget) * 100);
+    return { text: `${formatUsd(safeSpent)} / ${formatUsd(budget)}`, pct };
+  };
+
+  const decisionQueue = {
+    blocked: allTasks.filter(t => (t.status || '').toLowerCase() === 'blocked'),
+    review: allTasks.filter(t => (t.status || '').toLowerCase() === 'for review'),
+    warnings: warningTasks
+  };
+
+  const queueCount = decisionQueue.blocked.length + decisionQueue.review.length + decisionQueue.warnings.length;
 
   if (loading) {
     return (
@@ -232,10 +303,13 @@ export function CTODashboard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-700 to-teal-500 flex items-center justify-center shadow-lg shadow-teal-500/20">
               <Brain className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight">CTO</h1>
+            <div>
+              <h1 className="text-3xl font-bold text-foreground tracking-tight">CTO War Room</h1>
+              <p className="text-xs text-muted-foreground uppercase tracking-[0.2em]">Executive Command</p>
+            </div>
           </div>
           
           <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-green-500/10 border border-green-500/20 shadow-sm">
@@ -243,27 +317,112 @@ export function CTODashboard() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
             </span>
-            <span className="text-xs font-bold text-green-500 uppercase tracking-widest">Active</span>
+            <span className="text-xs font-bold text-green-500 uppercase tracking-widest">Live</span>
+          </div>
+        </div>
+
+        {/* Executive Brief */}
+        <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+          <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/20 blur-3xl" />
+          <div className="absolute -right-8 top-4 h-44 w-44 pointer-events-none opacity-70 -z-10">
+            <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.9),rgba(255,255,255,0.15)_35%,rgba(20,184,166,0.25)_55%,rgba(15,23,42,0.9)_80%)] shadow-[0_25px_60px_rgba(0,0,0,0.45)] border border-teal-500/25" />
+            <div className="absolute left-6 top-6 h-10 w-10 rounded-full bg-white/60 blur-sm" />
+            <div className="absolute left-10 top-14 h-5 w-5 rounded-full bg-white/40 blur-[1px]" />
+            <div className="absolute inset-x-6 bottom-4 h-6 rounded-full bg-black/40 blur-xl" />
+          </div>
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-4">
+              <p className="text-xs font-bold uppercase tracking-[0.3em] text-teal-200/80">Executive Brief</p>
+              <h2 className="text-2xl font-bold text-foreground">Company Situation Overview</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-muted-foreground">
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-teal-200/80 mb-1">Yesterday</p>
+                  <p>{usage24h?.total_cost_usd ? `Spent ${formatUsd(usage24h.total_cost_usd)} across teams.` : 'No spend recorded.'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-teal-200/80 mb-1">Today</p>
+                  <p>{activeTasks.length} active tasks in motion.</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-teal-200/80 mb-1">Tomorrow</p>
+                  <p>{queueCount} decisions pending CEO attention.</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-border/60 bg-slate-900/50 p-4">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Decision Queue</p>
+                <p className="text-2xl font-bold text-foreground">{queueCount}</p>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-slate-900/50 p-4">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Risk Alerts</p>
+                <p className="text-2xl font-bold text-foreground">{warningTasks.length}</p>
+              </div>
+              <button className="w-full rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-200 py-2.5 text-sm font-bold hover:bg-teal-500/30 transition">
+                Review Decision Queue
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Decision Queue */}
+        <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+          <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+          <div className="relative z-10">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-bold text-foreground flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-orange-400" />
+              Decision Queue
+            </h3>
+            <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{queueCount} pending</span>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {(['blocked', 'review', 'warnings'] as const).map((bucket) => {
+              const items = decisionQueue[bucket];
+              const label = bucket === 'blocked' ? 'Blocked' : bucket === 'review' ? 'For Review' : 'Warnings';
+              return (
+                <div key={bucket} className="rounded-2xl border border-border/80 bg-secondary/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">{label}</p>
+                  <div className="space-y-3">
+                    {items.length > 0 ? items.slice(0, 4).map((t: any) => (
+                      <div key={t.id} className="rounded-xl border border-border/70 bg-background/40 p-3">
+                        <p className="text-sm font-semibold text-foreground truncate">{t.title}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">{t.project_name || 'No project'} • {t.team_name || 'No team'}</p>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button className="px-2.5 py-1 rounded-md border border-border text-xs font-bold">Approve</button>
+                          <button className="px-2.5 py-1 rounded-md border border-border text-xs font-bold">Clarify</button>
+                        </div>
+                      </div>
+                    )) : (
+                      <p className="text-sm text-muted-foreground">No items.</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column: Configuration & Controls */}
+          {/* Left Column: Governance & Controls */}
           <div className="lg:col-span-2 space-y-6">
             
-            {/* Behavior & Strategy Section */}
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-8 border border-border shadow-sm">
+            {/* Decision Governance */}
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+              <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+              <div className="relative z-10">
               <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-3">
                 <Settings2 className="w-6 h-6 text-primary" />
-                Behavior & Strategy
+                Decision Governance
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                {/* Strategic Mode */}
+                {/* Operating Posture */}
                 <div className="space-y-4">
                   <label className="text-base font-semibold text-foreground flex items-center gap-2">
                     <Target className="w-5 h-5 text-blue-500" />
-                    Strategic Mode
+                    Operating Posture
                   </label>
                   <div className="flex p-1.5 bg-secondary/30 rounded-xl border border-border">
                     {['aggressive', 'balanced', 'conservative'].map((mode) => (
@@ -281,9 +440,9 @@ export function CTODashboard() {
                     ))}
                   </div>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    {config.strategy === 'aggressive' && "Maximize velocity. Higher API costs, more parallel tasks."}
-                    {config.strategy === 'balanced' && "Optimal balance of speed, cost, and quality."}
-                    {config.strategy === 'conservative' && "Minimize costs. Strict rate limits, sequential processing."}
+                    {config.strategy === 'aggressive' && "Maximize velocity. Higher spend, more parallel execution."}
+                    {config.strategy === 'balanced' && "Balance speed, spend, and quality."}
+                    {config.strategy === 'conservative' && "Conserve spend. Sequential delivery and tighter limits."}
                   </p>
                 </div>
 
@@ -291,7 +450,7 @@ export function CTODashboard() {
                 <div className="space-y-4">
                   <label className="text-base font-semibold text-foreground flex items-center gap-2">
                     <Lock className="w-5 h-5 text-purple-500" />
-                    Autonomy Level
+                    Decision Autonomy
                   </label>
                   <div className="flex p-1.5 bg-secondary/30 rounded-xl border border-border">
                     <button
@@ -316,34 +475,38 @@ export function CTODashboard() {
                     </button>
                   </div>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    {config.autonomyLevel === 'full' ? "CTO makes and executes decisions independently." : "CTO requests approval for critical architectural changes."}
+                    {config.autonomyLevel === 'full' ? "CTO executes decisions independently." : "CTO requests approval for high-impact changes."}
                   </p>
                 </div>
               </div>
 
-              {/* CTO Brain Configuration (Explicit Model Selection) */}
+              {/* Decision Partner */}
               <div className="pt-8 border-t border-border space-y-6">
                 <div className="flex items-center justify-between">
                   <label className="text-base font-semibold text-foreground flex items-center gap-2">
                     <Cpu className="w-5 h-5 text-primary" />
-                    CTO Brain Configuration
+                    Decision Partner
                   </label>
                   <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
                     <Sparkles className="w-3 h-3 text-primary" />
-                    <span className="text-[10px] font-bold text-primary uppercase">Reasoning Engine</span>
+                    <span className="text-[10px] font-bold text-primary uppercase">Executive Reasoning</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Provider Choice */}
                   <div className="space-y-3">
-                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Decision Provider</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Decision Partner</span>
                     <div className="flex p-1 bg-secondary/20 rounded-lg border border-border/50">
-                      {['claude', 'gemini'].map(p => (
+                      {['claude', 'gemini', 'openai'].map(p => (
                         <button
                           key={p}
                           onClick={() => {
-                            const newModel = p === 'claude' ? 'claude-opus-4.5' : 'gemini-3-pro';
+                            const newModel = p === 'claude'
+                              ? 'claude-opus-4-5-20251101'
+                              : p === 'openai'
+                                ? 'gpt-5.2-pro'
+                                : 'gemini-3-pro-preview';
                             saveConfig({ ...config, ctoProvider: newModel });
                           }}
                           className={`flex-1 py-2 rounded-md text-xs font-bold capitalize transition-all ${
@@ -358,299 +521,234 @@ export function CTODashboard() {
                     </div>
                   </div>
 
-                  {/* Explicit Model Selection */}
+                  {/* Active Model (Fixed by Provider) */}
                   <div className="space-y-3">
-                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Active Reasoning Model</span>
-                    <select
-                      value={config.ctoProvider}
-                      onChange={(e) => saveConfig({ ...config, ctoProvider: e.target.value })}
-                      className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-bold text-foreground focus:ring-2 ring-primary/20 outline-none cursor-pointer"
-                    >
-                      {config.ctoProvider.includes('claude') ? (
-                        <>
-                          <option value="claude-opus-4.6">Claude Opus 4.6 (Max Intelligence)</option>
-                          <option value="claude-sonnet-4.5">Claude Sonnet 4.5 (Optimal Balance)</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="gemini-3-pro">Gemini 3 Pro (Vision & Logic)</option>
-                          <option value="gemini-3-flash">Gemini 3 Flash (Speed Optimized)</option>
-                          <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
-                        </>
-                      )}
-                    </select>
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Capability Tier (Fixed)</span>
+                    <div className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-bold text-foreground">
+                      {config.ctoProvider.includes('claude') && 'Claude Opus 4.5'}
+                      {config.ctoProvider.includes('gpt') && 'OpenAI GPT‑5.2 Pro'}
+                      {config.ctoProvider.includes('gemini') && 'Gemini 3 Pro Preview'}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Model is fixed by governance policy.</p>
                   </div>
                 </div>
               </div>
-            </motion.div>
-
-            {/* Provider & Resources Section */}
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card p-8 border border-border shadow-sm">
-              <h3 className="text-xl font-bold text-foreground mb-4 flex items-center gap-3">
-                <Server className="w-6 h-6 text-primary" />
-                Active Subscriptions
-              </h3>
-              <p className="text-base text-muted-foreground mb-6">
-                Enable only the providers you have active subscriptions for.
-              </p>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {['claude', 'gemini', 'codex'].map(provider => {
-                  const isActive = config.activeProviders?.includes(provider);
-                  return (
-                    <div 
-                      key={provider}
-                      className={`p-6 rounded-2xl border transition-all ${
-                        isActive 
-                          ? 'bg-secondary/20 border-primary/30 shadow-sm' 
-                          : 'bg-secondary/5 border-border opacity-70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-3 h-3 rounded-full ${isActive ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-400'}`} />
-                          <span className="text-lg font-bold capitalize text-foreground">{provider}</span>
-                        </div>
-                        <button
-                          onClick={() => toggleProvider(provider)}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            isActive ? 'bg-primary' : 'bg-slate-600'
-                          }`}
-                        >
-                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isActive ? 'translate-x-6' : 'translate-x-1'}`} />
-                        </button>
-                      </div>
-                      
-                      {isActive && (
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Plan Tier</label>
-                          <select
-                            value={config.subscriptions[provider as keyof typeof config.subscriptions]?.plan || 'pro'}
-                            onChange={(e) => saveConfig({
-                              ...config,
-                              subscriptions: { 
-                                ...config.subscriptions, 
-                                [provider]: { plan: e.target.value } 
-                              }
-                            })}
-                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium focus:ring-2 ring-primary/20 outline-none cursor-pointer"
-                          >
-                            <option value="pro">Pro / Standard</option>
-                            <option value="max5x">Max 5x / Ultra</option>
-                            <option value="max20x">Max 20x / Enterprise</option>
-                          </select>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
             </motion.div>
 
-            {/* Operational Style (Formerly Advanced Settings) */}
-            <div className="border border-border rounded-2xl overflow-hidden bg-background/50 shadow-sm">
-              <button 
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className="w-full flex items-center justify-between p-6 hover:bg-secondary/30 transition-colors"
-              >
-                <div className="flex items-center gap-3 text-base font-bold text-muted-foreground">
-                  <Gauge className="w-5 h-5" />
-                  Operational Style
-                </div>
-                {showAdvanced ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
-              </button>
+            {/* Decision Partners section removed for now */}
 
-              <AnimatePresence>
-                {showAdvanced && (
-                  <motion.div 
-                    initial={{ height: 0 }} 
-                    animate={{ height: 'auto' }} 
-                    exit={{ height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="p-8 border-t border-border bg-secondary/10 space-y-8">
-                       
-                       {/* Persistence Slider */}
-                       <div className="space-y-3">
-                          <div className="flex justify-between">
-                            <label className="text-sm font-bold text-foreground flex items-center gap-2">
-                              <Zap className="w-4 h-4 text-yellow-500" /> Persistence
-                            </label>
-                            <span className="text-xs font-bold text-muted-foreground uppercase">
-                              {config.maxRetries <= 1 ? "Low (Give up easily)" : config.maxRetries === 2 ? "Medium (Try a few times)" : "High (Relentless)"}
-                            </span>
-                          </div>
-                          <input
-                            type="range"
-                            min="1"
-                            max="3"
-                            step="1"
-                            value={config.maxRetries}
-                            onChange={(e) => saveConfig({ ...config, maxRetries: parseInt(e.target.value) })}
-                            className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
-                          />
-                        </div>
-
-                        {/* Delegation Threshold Slider */}
-                        <div className="space-y-3">
-                          <div className="flex justify-between">
-                            <label className="text-sm font-bold text-foreground flex items-center gap-2">
-                              <Target className="w-4 h-4 text-blue-500" /> Delegation Threshold
-                            </label>
-                            <span className="text-xs font-bold text-muted-foreground uppercase">
-                              {config.splitComplexityScore > 60 ? "Hands-on (Do it yourself)" : config.splitComplexityScore > 30 ? "Collaborative (Split complex tasks)" : "Managerial (Delegate everything)"}
-                            </span>
-                          </div>
-                          <input
-                            type="range"
-                            min="10"
-                            max="90"
-                            step="10"
-                            value={config.splitComplexityScore}
-                            onChange={(e) => saveConfig({ ...config, splitComplexityScore: parseInt(e.target.value) })}
-                            className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-blue-500"
-                          />
-                        </div>
-
-                        {/* Patience Slider */}
-                        <div className="space-y-3">
-                          <div className="flex justify-between">
-                            <label className="text-sm font-bold text-foreground flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-green-500" /> Patience (Wait for Resources)
-                            </label>
-                            <span className="text-xs font-bold text-muted-foreground uppercase">
-                              {config.deferWindowUsagePercent > 90 ? "Urgent (Push limits)" : config.deferWindowUsagePercent > 70 ? "Flexible (Wait for windows)" : "Patient (Strict budget)"}
-                            </span>
-                          </div>
-                          <input
-                            type="range"
-                            min="50"
-                            max="99"
-                            step="5"
-                            value={config.deferWindowUsagePercent}
-                            onChange={(e) => saveConfig({ ...config, deferWindowUsagePercent: parseInt(e.target.value) })}
-                            className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-green-500"
-                          />
-                        </div>
-
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            {/* Operating Mode section removed */}
 
             {/* Live Activity (Moved to Main Column) */}
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card p-8 border border-border shadow-sm">
-              <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-3">
-                <Activity className="w-6 h-6 text-primary" />
-                Live Activity
-              </h3>
-              
-              {activeTasks.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {activeTasks.map((task) => (
-                    <div key={task.id} className="p-4 rounded-xl bg-secondary/30 border border-border flex items-center justify-between group hover:border-primary/50 transition-colors">
-                      <div className="min-w-0">
-                        <p className="font-bold text-base text-foreground truncate">{task.title}</p>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mt-1">Project: {task.project_name || 'General'}</p>
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+              <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+              <div className="relative z-10">
+                <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-3">
+                  <Activity className="w-6 h-6 text-primary" />
+                  Live Activity
+                </h3>
+                
+                {activeTasks.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {activeTasks.map((task) => (
+                      <div key={task.id} className="p-4 rounded-xl bg-secondary/30 border border-border flex items-center justify-between group hover:border-primary/50 transition-colors">
+                        <div className="min-w-0">
+                          <p className="font-bold text-base text-foreground truncate">{task.title}</p>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mt-1">Project: {task.project_name || 'General'}</p>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4 shrink-0">
+                          <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
+                          <span className="text-xs font-black uppercase tracking-tighter text-primary">Live</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-4 shrink-0">
-                        <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
-                        <span className="text-xs font-black uppercase tracking-tighter text-primary">Live</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground bg-secondary/5 rounded-2xl border border-dashed border-border flex items-center justify-center gap-4">
-                  <Clock className="w-6 h-6 opacity-30" />
-                  <div>
-                    <p className="text-sm font-bold text-foreground/70">CTO Standing By</p>
-                    <p className="text-[10px] opacity-70">Awaiting task orchestration...</p>
+                    ))}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground bg-secondary/5 rounded-2xl border border-dashed border-border flex items-center justify-center gap-4">
+                    <Clock className="w-6 h-6 opacity-30" />
+                    <div>
+                      <p className="text-sm font-bold text-foreground/70">CTO Standing By</p>
+                      <p className="text-[10px] opacity-70">Awaiting task orchestration...</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </motion.div>
 
           </div>
 
           {/* Right Column: Status & Monitoring */}
           <div className="space-y-6">
-            
-            {/* Resource Health Card */}
-            <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="glass-card p-8 border border-border h-fit shadow-sm">
-              <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-3">
-                <Shield className="w-6 h-6 text-primary" />
-                Resource Health
-              </h3>
-              
-              <div className="space-y-0 rounded-2xl border border-border/80 overflow-hidden divide-y divide-border/80">
-                {resources ? (
-                  Object.entries(resources).map(([provider, status]) => {
-                    const health = getResourceHealth(provider as keyof ResourceStatus);
-                    if (health === 'disabled') return null;
 
-                    return (
-                      <div key={provider} className="p-3 px-5 bg-secondary/5 hover:bg-secondary/10 transition-colors border-border/80">
-                        <div className="flex justify-between items-center">
-                          <div className="flex flex-col">
-                            <span className="capitalize font-bold text-base leading-tight">{provider}</span>
-                            {!status.available && status.reason && (
-                              <span className={`text-[10px] font-bold uppercase tracking-tighter ${status.needsAuth ? 'text-orange-500' : 'text-destructive'}`}>
-                                {status.reason}
-                              </span>
-                            )}
+            {/* Capital & Allocation */}
+            <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/70 via-slate-900/40 to-teal-900/20 p-8 h-fit shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+              <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-teal-500/15 blur-3xl" />
+              <div className="relative z-10">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-foreground flex items-center gap-3">
+                  <Gauge className="w-6 h-6 text-primary" />
+                  Capital & Allocation
+                </h3>
+                <button
+                  onClick={fetchDashboardData}
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg bg-secondary/60 hover:bg-secondary text-foreground border border-border"
+                >
+                  Refresh
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">Includes CTO + Team Lead activity across teams and projects</p>
+
+              <div className="grid grid-cols-1 gap-3 mb-6">
+                <select
+                  className="w-full px-3 py-2 rounded-lg bg-secondary/40 border border-border text-sm"
+                  value={usageFilters.projectId || ''}
+                  onChange={(e) => setUsageFilters((prev) => ({ ...prev, projectId: e.target.value || undefined }))}
+                >
+                  <option value="">All Projects</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <select
+                  className="w-full px-3 py-2 rounded-lg bg-secondary/40 border border-border text-sm"
+                  value={usageFilters.teamId || ''}
+                  onChange={(e) => setUsageFilters((prev) => ({ ...prev, teamId: e.target.value || undefined }))}
+                >
+                  <option value="">All Teams</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border/80 bg-secondary/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">Allocation Health</p>
+                  <div className="space-y-3">
+                    {(() => {
+                      const line = budgetStatusLine(usage24h?.total_cost_usd, config.costBudgets?.perTeamDailyUsd);
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between text-sm font-semibold">
+                            <span>Team (24h burn)</span>
+                            <span>{line.text}</span>
                           </div>
-
-                          <div className="flex items-center gap-2">
-                            {status.needsAuth ? (
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    const token = localStorage.getItem('token');
-                                    await fetch(`${API_URL}/runner/open-terminal`, {
-                                      method: 'POST',
-                                      headers: { 
-                                        'Authorization': `Bearer ${token}`,
-                                        'Content-Type': 'application/json'
-                                      },
-                                      body: JSON.stringify({ command: provider })
-                                    });
-                                    toast.success(`Opening terminal for ${provider} login...`);
-                                  } catch (e) {
-                                    toast.error('Failed to trigger terminal');
-                                  }
-                                }}
-                                className="px-4 py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 text-xs font-bold border border-orange-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm"
-                              >
-                                Enable
-                              </button>
-                            ) : (
-                              <span className="text-xs font-bold px-3 py-1 rounded-full bg-green-500/10 text-green-500 border border-green-500/20 flex items-center gap-1.5">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Enabled
-                              </span>
-                            )}
+                          <div className="h-2 rounded-full bg-secondary/60 mt-2 overflow-hidden">
+                            <div className={`h-full ${line.pct > 100 ? 'bg-red-500' : line.pct > 80 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, line.pct)}%` }} />
                           </div>
                         </div>
-                      </div>
-                    );                  })
-                ) : (
-                  <div className="text-center py-10 text-muted-foreground bg-secondary/10 rounded-2xl border border-dashed border-border">
-                    <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-base font-bold text-foreground/70">Waiting for Runner...</p>
-                    <p className="text-xs mt-1 opacity-70">Status not reported yet</p>
+                      );
+                    })()}
+                    {(() => {
+                      const line = budgetStatusLine(usage7d?.total_cost_usd, config.costBudgets?.perProjectWeeklyUsd);
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between text-sm font-semibold">
+                            <span>Project (7d burn)</span>
+                            <span>{line.text}</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-secondary/60 mt-2 overflow-hidden">
+                            <div className={`h-full ${line.pct > 100 ? 'bg-red-500' : line.pct > 80 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, line.pct)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    <div className="text-xs text-muted-foreground">
+                      Task allocation: {formatUsd(config.costBudgets?.perTaskUsd)} per task
+                    </div>
                   </div>
-                )}
-                
-                {resources && (!config.activeProviders || config.activeProviders.length === 0) && (
-                   <p className="text-sm text-yellow-500 font-bold italic text-center py-4 bg-yellow-500/5 rounded-xl border border-yellow-500/10">
-                     No active providers configured.
-                   </p>
-                )}
+                </div>
+
+                <div className="rounded-xl border border-border/80 bg-secondary/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">Burn Totals</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+                      <p className="text-xs text-muted-foreground">Last 24h</p>
+                      <p className="text-lg font-bold">{formatUsd(usage24h?.total_cost_usd || 0)}</p>
+                      <p className="text-[10px] text-muted-foreground">{usage24h?.total_input_tokens || 0} in / {usage24h?.total_output_tokens || 0} out</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+                      <p className="text-xs text-muted-foreground">Last 7d</p>
+                      <p className="text-lg font-bold">{formatUsd(usage7d?.total_cost_usd || 0)}</p>
+                      <p className="text-[10px] text-muted-foreground">{usage7d?.total_input_tokens || 0} in / {usage7d?.total_output_tokens || 0} out</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/80 bg-secondary/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">Provider Breakdown (7d)</p>
+                  <div className="space-y-2">
+                    {usage7d && Object.keys(usage7d.by_provider || {}).length > 0 ? (
+                      Object.entries(usage7d.by_provider).map(([provider, data]) => (
+                        <div key={provider} className="flex items-center justify-between text-sm font-semibold">
+                          <span className="capitalize">{provider}</span>
+                          <span>{formatUsd(data.total_cost_usd)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No usage recorded.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/80 bg-secondary/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">CTO vs Team Leads (7d)</p>
+                  <div className="space-y-2">
+                    {usage7d && usage7d.by_actor_type && Object.keys(usage7d.by_actor_type).length > 0 ? (
+                      Object.entries(usage7d.by_actor_type).map(([actor, data]) => (
+                        <div key={actor} className="flex items-center justify-between text-sm font-semibold">
+                          <span className="capitalize">{actor.replace('_', ' ')}</span>
+                          <span>{formatUsd(data.total_cost_usd)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No actor usage recorded.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/80 bg-secondary/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">High-Cost Tasks (7d)</p>
+                  <div className="space-y-2">
+                    {topTasks.length > 0 ? (
+                      topTasks.map((t) => (
+                        <div key={t.task_id} className="flex items-center justify-between text-sm">
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate">{t.title || 'Untitled Task'}</p>
+                            <p className="text-[10px] text-muted-foreground">{t.project_name || 'No project'} • {t.team_name || 'No team'}</p>
+                          </div>
+                          <span className="text-xs font-bold">{formatUsd(t.total_cost_usd)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No task usage data yet.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/80 bg-secondary/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">Warning Feed</p>
+                  <div className="space-y-2">
+                    {warningTasks.length > 0 ? (
+                      warningTasks.slice(0, 5).map((t) => (
+                        <div key={t.id} className="flex items-center justify-between text-sm">
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate">{t.title}</p>
+                            <p className="text-[10px] text-muted-foreground">{t.status}</p>
+                          </div>
+                          <AlertTriangle className="w-4 h-4 text-warning" />
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No warnings.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
               </div>
             </motion.div>
-
+            
           </div>
         </div>
       </div>

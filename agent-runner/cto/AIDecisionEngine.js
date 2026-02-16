@@ -10,15 +10,36 @@
 
 const fs = require('fs').promises;
 const path = require('path');
-const os = require('os');
 const OpenAI = require('openai');
+const ClaudeApiClient = require('./claude-api-client');
 
 class AIDecisionEngine {
-  constructor(modelSelector, agentExecutor) {
+  constructor(modelSelector, agentExecutor, usageTracker = null, openaiSdkExecutor = null, googleAdkExecutor = null) {
     this.modelSelector = modelSelector;
     this.agentExecutor = agentExecutor;
-    this.systemPromptPath = path.join(os.homedir(), 'mycompany', 'cto', 'SYSTEM_PROMPT.md');
-    this.companyDir = path.join(os.homedir(), 'mycompany');
+    this.usageTracker = usageTracker;
+    this.openaiSdkExecutor = openaiSdkExecutor;
+    this.googleAdkExecutor = googleAdkExecutor;
+    this.systemPromptPath = path.resolve(__dirname, '..', '..', 'mycompany', 'cto', 'SYSTEM_PROMPT.md');
+    this.companyDir = path.resolve(__dirname, '..', '..', 'mycompany');
+    this.claudeClient = process.env.ANTHROPIC_API_KEY ? new ClaudeApiClient(process.env.ANTHROPIC_API_KEY) : null;
+  }
+
+  async _executeWithProvider(prompt, provider, modelName, actorType = 'cto') {
+    if (provider === 'gemini' && this.googleAdkExecutor) {
+      return this.googleAdkExecutor.executePrompt(prompt, {
+        projectDir: process.cwd(),
+        identity: { name: 'CTO', system_prompt: 'You are the CTO.' },
+        employees: [],
+        model: modelName,
+        actorType
+      });
+    }
+    return this.agentExecutor.execute({
+      id: 'cto-analysis',
+      title: 'CTO Task Analysis',
+      description: prompt
+    }, provider, modelName);
   }
 
   /**
@@ -27,7 +48,15 @@ class AIDecisionEngine {
   async getSystemPrompt() {
     try {
       const content = await fs.readFile(this.systemPromptPath, 'utf-8');
-      return content;
+      let soul = '';
+      let user = '';
+      try {
+        soul = await fs.readFile(path.resolve(__dirname, '..', '..', 'mycompany', 'cto', 'SOUL.md'), 'utf-8');
+      } catch {}
+      try {
+        user = await fs.readFile(path.resolve(__dirname, '..', '..', 'mycompany', 'cto', 'USER.md'), 'utf-8');
+      } catch {}
+      return [soul, user, content].filter(Boolean).join('\n\n');
     } catch (error) {
       console.warn('[CTO] Could not read system prompt from file, using fallback');
       return this._getFallbackPrompt();
@@ -78,7 +107,7 @@ class AIDecisionEngine {
   }
 
   async getPreviousAttempts(task, context = {}) {
-    const historyPath = path.join(os.homedir(), 'mycompany', 'cto', 'TASK_HISTORY.md');
+    const historyPath = path.resolve(__dirname, '..', '..', 'mycompany', 'cto', 'TASK_HISTORY.md');
     const teamId = context.team?.id || null;
     const teamName = context.team?.name || null;
     try {
@@ -178,6 +207,20 @@ Analyze tasks and return JSON with: action (execute/split/defer), reasoning, com
       ? 'Unknown'
       : String(context.activeTasksUntilDeadline);
 
+    const costUsage = context.costUsage || {};
+    const costLine24h = costUsage.last24h?.total_cost_usd != null
+      ? `$${costUsage.last24h.total_cost_usd.toFixed(2)}`
+      : 'Unknown';
+    const costLine7d = costUsage.last7d?.total_cost_usd != null
+      ? `$${costUsage.last7d.total_cost_usd.toFixed(2)}`
+      : 'Unknown';
+    const costLineTask = costUsage.taskLast7d?.total_cost_usd != null
+      ? `$${costUsage.taskLast7d.total_cost_usd.toFixed(2)}`
+      : 'Unknown';
+    const budgetWarnings = costUsage.budgetStatus?.warnings?.length
+      ? costUsage.budgetStatus.warnings.join(' | ')
+      : 'None';
+
     const prompt = `
 ${systemPrompt}
 
@@ -200,6 +243,17 @@ ${scheduledDateTime ? `**Scheduled For:** ${scheduledDateTime.toISOString()}` : 
 ## Active Workload
 
 **Active tasks due on or before this deadline:** ${workloadLine}
+
+---
+
+## Cost & Usage (Soft Budget Signals)
+
+**Team spend last 24h:** ${costLine24h}
+**Project spend last 7d:** ${costLine7d}
+**Task spend last 7d:** ${costLineTask}
+**Budget warnings:** ${budgetWarnings}
+**Soft budget rule:** If budget warnings are present, prefer the lowest-cost viable action (enhance or defer) unless splitting is necessary to meet the deadline.
+**Soft budget rule:** If budget warnings are present, prefer the lowest-cost viable action (enhance or defer) unless splitting is necessary to meet the deadline.
 
 ---
 
@@ -228,11 +282,7 @@ All subtasks must inherit project_id: ${project_id || 'null'} and team_id: ${tea
 
     try {
       // Call AI model for analysis
-      const result = await this.agentExecutor.execute({
-        id: 'cto-analysis',
-        title: 'CTO Task Analysis',
-        description: prompt
-      }, modelSelection.provider, modelSelection.model);
+      const result = await this._executeWithProvider(prompt, modelSelection.provider, modelSelection.model, 'cto');
 
       if (!result.success || !result.output) {
         console.log('[CTO] AI analysis failed, falling back to rule-based');
@@ -246,11 +296,22 @@ All subtasks must inherit project_id: ${project_id || 'null'} and team_id: ${tea
         console.log(`[CTO] AI Decision: ${analysis.action} (confidence: ${analysis.confidence}%)`);
         console.log(`[CTO] Reasoning: ${analysis.reasoning}`);
 
-        // Record CTO usage
-        this.modelSelector.resourceManager.trackCTOUsage(
-          modelSelection.provider,
-          result.messagesUsed || 1
-        );
+        if (this.usageTracker) {
+          const usageEvent = this.usageTracker.buildExecutionUsageEvent(
+            task,
+            'cto',
+            modelSelection.provider,
+            modelSelection.model,
+            {
+              cost: result.cost,
+              tokens_used: result.tokens_used,
+              duration: result.duration,
+              toolsUsed: result.toolsUsed,
+              sessionId: result.sessionId
+            }
+          );
+          await this.usageTracker.recordEvent(usageEvent);
+        }
       }
 
       return analysis;
@@ -258,6 +319,380 @@ All subtasks must inherit project_id: ${project_id || 'null'} and team_id: ${tea
     } catch (error) {
       console.error('[CTO] AI analysis error:', error.message);
       return null; // Fallback to rule-based
+    }
+  }
+
+  async analyzeTaskWithProvider(task, context = {}, provider = 'gemini', modelName = null) {
+    if (!provider) return null;
+    const { title, description } = task;
+    const systemPrompt = await this.getSystemPrompt();
+    const companyContext = await this.getCompanyContext();
+    const now = new Date();
+    const createdDate = task.created_at ? new Date(task.created_at) : now;
+    const deadlineDate = task.due_date ? new Date(task.due_date) : context.deadline;
+    const scheduledDateTime = task.scheduled_date && task.scheduled_time
+      ? new Date(`${task.scheduled_date}T${task.scheduled_time}`)
+      : null;
+
+    const prompt = `
+${systemPrompt}
+
+---
+## Task Details
+**Title:** ${title}
+**Description:** ${description || 'No description provided'}
+**Task ID:** ${task.id}
+**Created:** ${createdDate.toISOString()}
+${deadlineDate ? `**Deadline:** ${deadlineDate.toISOString()}` : ''}
+${scheduledDateTime ? `**Scheduled For:** ${scheduledDateTime.toISOString()}` : ''}
+**Project ID:** ${task.project_id || 'None'}
+**Team ID:** ${task.team_id || 'None'}
+**Priority:** ${task.priority || 'medium'}
+
+---
+## Active Workload
+**Active tasks due on or before this deadline:** ${context.activeTasksUntilDeadline ?? 'Unknown'}
+
+---
+## Company Context
+${companyContext.organization ? companyContext.organization.substring(0, 1000) : 'Not available'}
+${companyContext.teams ? companyContext.teams.substring(0, 1000) : 'Not available'}
+
+---
+Return strictly JSON (no markdown).
+If action is "enhance", include "enhanced_description" with the full Team Lead-ready task description.`.trim();
+
+    try {
+      const result = await this._executeWithProvider(prompt, provider, modelName, 'cto');
+
+      if (!result.success || !result.output) {
+        console.log('[CTO] AI analysis failed, falling back to rule-based');
+        return null;
+      }
+
+      const analysis = await this._parseAIResponse(result.output, 'decision');
+      if (analysis) {
+        analysis._usage = {
+          provider,
+          model: modelName,
+          usage: null,
+          modelUsage: null,
+          raw: { tokens_used: result.tokens_used, cost: result.cost }
+        };
+      }
+      return analysis;
+    } catch (err) {
+      console.error('[CTO] AI analysis error:', err.message);
+      return null;
+    }
+  }
+
+  async analyzeTaskWithClaudeApi(task, context = {}, modelName = 'claude-opus-4-5-20251101') {
+    if (!this.claudeClient) return null;
+    const systemPrompt = await this.getSystemPrompt();
+    const companyContext = await this.getCompanyContext();
+    const now = new Date();
+    const createdDate = task.created_at ? new Date(task.created_at) : now;
+    const deadlineDate = task.due_date ? new Date(task.due_date) : context.deadline;
+    const scheduledDateTime = task.scheduled_date && task.scheduled_time
+      ? new Date(`${task.scheduled_date}T${task.scheduled_time}`)
+      : null;
+    const costUsage = context.costUsage || {};
+    const costLine24h = costUsage.last24h?.total_cost_usd != null
+      ? `$${costUsage.last24h.total_cost_usd.toFixed(2)}`
+      : 'Unknown';
+    const costLine7d = costUsage.last7d?.total_cost_usd != null
+      ? `$${costUsage.last7d.total_cost_usd.toFixed(2)}`
+      : 'Unknown';
+    const costLineTask = costUsage.taskLast7d?.total_cost_usd != null
+      ? `$${costUsage.taskLast7d.total_cost_usd.toFixed(2)}`
+      : 'Unknown';
+    const budgetWarnings = costUsage.budgetStatus?.warnings?.length
+      ? costUsage.budgetStatus.warnings.join(' | ')
+      : 'None';
+
+    const prompt = `
+${systemPrompt}
+
+---
+## Task Details
+**Title:** ${task.title}
+**Description:** ${task.description || 'No description provided'}
+**Task ID:** ${task.id}
+**Created:** ${createdDate.toISOString()}
+${deadlineDate ? `**Deadline:** ${deadlineDate.toISOString()}` : ''}
+${scheduledDateTime ? `**Scheduled For:** ${scheduledDateTime.toISOString()}` : ''}
+**Project ID:** ${task.project_id || 'None'}
+**Team ID:** ${task.team_id || 'None'}
+**Priority:** ${task.priority || 'medium'}
+
+---
+## Active Workload
+**Active tasks due on or before this deadline:** ${context.activeTasksUntilDeadline ?? 'Unknown'}
+
+---
+## Cost & Usage (Soft Budget Signals)
+**Team spend last 24h:** ${costLine24h}
+**Project spend last 7d:** ${costLine7d}
+**Task spend last 7d:** ${costLineTask}
+**Budget warnings:** ${budgetWarnings}
+
+---
+## Company Context
+${companyContext.organization ? companyContext.organization.substring(0, 1000) : 'Not available'}
+${companyContext.teams ? companyContext.teams.substring(0, 1000) : 'Not available'}
+
+---
+Return strictly JSON (no markdown).
+If action is "enhance", include "enhanced_description" with the full Team Lead-ready task description.`.trim();
+
+    const result = await this.claudeClient.completeJson({
+      model: modelName,
+      system: 'You are a CTO. Output valid JSON only.',
+      prompt,
+      thinking: { type: 'enabled', budget_tokens: 4000 }
+    });
+    const raw = result?.text || '';
+    const analysis = this._parseAIResponse(raw, 'decision');
+    if (analysis) {
+      analysis._usage = {
+        provider: 'claude',
+        model: modelName,
+        usage: result?.usage || null,
+        modelUsage: result?.modelUsage || null,
+        raw: result?.raw || null
+      };
+    }
+    return analysis;
+  }
+
+  async analyzeClarificationWithClaudeApi(task, context = {}, modelName = 'claude-opus-4-5-20251101') {
+    if (!this.claudeClient) return null;
+    const prompt = `
+You are the CTO. Determine if you can provide clarification for the blocked task.
+Return strict JSON:
+{
+  "canAnswer": true|false,
+  "answer": "clarification to give team lead",
+  "escalationNote": "why CEO attention is required"
+}
+
+Task: ${task.title}
+Description: ${task.description || ''}
+History: ${(context.history || []).map(h => h.content).join('\n')}
+`.trim();
+
+    const result = await this.claudeClient.completeJson({
+      model: modelName,
+      system: 'Return JSON only.',
+      prompt,
+      thinking: { type: 'enabled', budget_tokens: 4000 }
+    });
+    const raw = result?.text || '';
+    const analysis = this._parseAIResponse(raw, 'clarification');
+    if (analysis) {
+      analysis._usage = {
+        provider: 'claude',
+        model: modelName,
+        usage: result?.usage || null,
+        modelUsage: result?.modelUsage || null,
+        raw: result?.raw || null
+      };
+    }
+    return analysis;
+  }
+
+  async analyzeFailureWithClaudeApi(task, context = {}, modelName = 'claude-opus-4-5-20251101') {
+    if (!this.claudeClient) return null;
+    const prompt = `
+You are the CTO. Decide whether to retry execution or block for CEO attention.
+Return strict JSON:
+{
+  "action": "retry_execute" | "block_ceo",
+  "reasoning": "why",
+  "comment": "comment to post"
+}
+
+Task: ${task.title}
+Description: ${task.description || ''}
+Last Output: ${context.lastOutput || ''}
+`.trim();
+
+    const result = await this.claudeClient.completeJson({
+      model: modelName,
+      system: 'Return JSON only.',
+      prompt,
+      thinking: { type: 'enabled', budget_tokens: 4000 }
+    });
+    const raw = result?.text || '';
+    const analysis = this._parseAIResponse(raw, 'failure');
+    if (analysis) {
+      analysis._usage = {
+        provider: 'claude',
+        model: modelName,
+        usage: result?.usage || null,
+        modelUsage: result?.modelUsage || null,
+        raw: result?.raw || null
+      };
+    }
+    return analysis;
+  }
+
+  async analyzeTaskWithOpenAI(task, context = {}, modelName = 'gpt-5.2-pro') {
+    if (!this.openaiSdkExecutor) return null;
+    const systemPrompt = await this.getSystemPrompt();
+    const companyContext = await this.getCompanyContext();
+    const now = new Date();
+    const createdDate = task.created_at ? new Date(task.created_at) : now;
+    const deadlineDate = task.due_date ? new Date(task.due_date) : context.deadline;
+    const scheduledDateTime = task.scheduled_date && task.scheduled_time
+      ? new Date(`${task.scheduled_date}T${task.scheduled_time}`)
+      : null;
+
+    const prompt = `
+${systemPrompt}
+
+---
+## Task Details
+**Title:** ${task.title}
+**Description:** ${task.description || 'No description provided'}
+**Task ID:** ${task.id}
+**Created:** ${createdDate.toISOString()}
+${deadlineDate ? `**Deadline:** ${deadlineDate.toISOString()}` : ''}
+${scheduledDateTime ? `**Scheduled For:** ${scheduledDateTime.toISOString()}` : ''}
+**Project ID:** ${task.project_id || 'None'}
+**Team ID:** ${task.team_id || 'None'}
+**Priority:** ${task.priority || 'medium'}
+
+---
+## Active Workload
+**Active tasks due on or before this deadline:** ${context.activeTasksUntilDeadline ?? 'Unknown'}
+
+---
+## Cost & Usage (Soft Budget Signals)
+**Team spend last 24h:** ${context.costUsage?.last24h?.total_cost_usd ?? 'Unknown'}
+**Project spend last 7d:** ${context.costUsage?.last7d?.total_cost_usd ?? 'Unknown'}
+**Task spend last 7d:** ${context.costUsage?.taskLast7d?.total_cost_usd ?? 'Unknown'}
+**Budget warnings:** ${(context.costUsage?.budgetStatus?.warnings || []).join(' | ') || 'None'}
+**Soft budget rule:** If budget warnings are present, prefer the lowest-cost viable action (enhance or defer) unless splitting is necessary to meet the deadline.
+
+---
+## Company Context
+${companyContext.organization ? companyContext.organization.substring(0, 1000) : 'Not available'}
+${companyContext.teams ? companyContext.teams.substring(0, 1000) : 'Not available'}
+
+---
+Return strictly JSON (no markdown).
+If action is "enhance", include "enhanced_description" with the full Team Lead-ready task description.`.trim();
+
+    try {
+      const result = await this.openaiSdkExecutor.executePrompt(prompt, {
+        projectDir: process.cwd(),
+        identity: { name: 'CTO', system_prompt: systemPrompt },
+        employees: context.employees || [],
+        model: modelName,
+        actorType: 'cto'
+      });
+
+      const text = result?.output || '';
+      const analysis = this._parseAIResponse(text.trim(), 'decision');
+      if (analysis) {
+        analysis._usage = {
+          provider: 'openai',
+          model: modelName,
+          usage: result.usage || null,
+          modelUsage: null,
+          raw: result.rawUsage || null
+        };
+      }
+      return analysis;
+    } catch (err) {
+      console.error('[CTO] OpenAI SDK analysis error:', err.message);
+      return null;
+    }
+  }
+
+  async analyzeClarificationWithOpenAI(task, context = {}, modelName = 'gpt-5.2-pro') {
+    if (!this.openaiSdkExecutor) return null;
+    const prompt = `
+You are the CTO. Determine if you can provide clarification for the blocked task.
+Return strict JSON:
+{
+  "canAnswer": true|false,
+  "answer": "clarification to give team lead",
+  "escalationNote": "why CEO attention is required"
+}
+
+Task: ${task.title}
+Description: ${task.description || ''}
+History: ${(context.history || []).map(h => h.content).join('\n')}
+`.trim();
+
+    try {
+      const result = await this.openaiSdkExecutor.executePrompt(prompt, {
+        projectDir: process.cwd(),
+        identity: { name: 'CTO' },
+        employees: context.employees || [],
+        model: modelName,
+        actorType: 'cto'
+      });
+      const text = result?.output || '';
+      const analysis = this._parseAIResponse(text.trim(), 'clarification');
+      if (analysis) {
+        analysis._usage = {
+          provider: 'openai',
+          model: modelName,
+          usage: result.usage || null,
+          modelUsage: null,
+          raw: result.rawUsage || null
+        };
+      }
+      return analysis;
+    } catch (err) {
+      console.error('[CTO] OpenAI SDK clarification error:', err.message);
+      return null;
+    }
+  }
+
+  async analyzeFailureWithOpenAI(task, context = {}, modelName = 'gpt-5.2-pro') {
+    if (!this.openaiSdkExecutor) return null;
+    const prompt = `
+You are the CTO. Decide whether to retry execution or block for CEO attention.
+Return strict JSON:
+{
+  "action": "retry_execute" | "block_ceo",
+  "reasoning": "why",
+  "comment": "comment to post"
+}
+
+Task: ${task.title}
+Description: ${task.description || ''}
+Last Output: ${context.lastOutput || ''}
+`.trim();
+
+    try {
+      const result = await this.openaiSdkExecutor.executePrompt(prompt, {
+        projectDir: process.cwd(),
+        identity: { name: 'CTO' },
+        employees: context.employees || [],
+        model: modelName,
+        actorType: 'cto'
+      });
+      const text = result?.output || '';
+      const analysis = this._parseAIResponse(text.trim(), 'failure');
+      if (analysis) {
+        analysis._usage = {
+          provider: 'openai',
+          model: modelName,
+          usage: result.usage || null,
+          modelUsage: null,
+          raw: result.rawUsage || null
+        };
+      }
+      return analysis;
+    } catch (err) {
+      console.error('[CTO] OpenAI SDK failure analysis error:', err.message);
+      return null;
     }
   }
 
@@ -315,11 +750,15 @@ Respond in JSON format:
 }`;
 
     try {
-      const verificationResult = await this.agentExecutor.execute({
-        id: 'cto-verification',
-        title: 'CTO Verification',
-        description: prompt
-      }, modelSelection.provider, modelSelection.model);
+      const verificationResult = modelSelection.provider === 'openai' && this.openaiSdkExecutor
+        ? await this.openaiSdkExecutor.executePrompt(prompt, {
+            projectDir: process.cwd(),
+            identity: { name: 'CTO' },
+            employees: [],
+            model: modelSelection.model,
+            actorType: 'cto'
+          })
+        : await this._executeWithProvider(prompt, modelSelection.provider, modelSelection.model, 'cto');
 
       if (verificationResult.success && verificationResult.output) {
         const verification = await this._parseAIResponse(verificationResult.output, 'verification');
@@ -327,10 +766,31 @@ Respond in JSON format:
         if (verification) {
           console.log(`[CTO] Verification: ${verification.passed ? 'PASSED' : 'FAILED'} (score: ${verification.score})`);
 
-          this.modelSelector.resourceManager.trackCTOUsage(
-            modelSelection.provider,
-            verificationResult.messagesUsed || 1
-          );
+          if (this.usageTracker) {
+            const usageEvent = modelSelection.provider === 'openai' && verificationResult.usage
+              ? this.usageTracker.buildOpenAIUsageEvent(
+                  task,
+                  'cto',
+                  'openai',
+                  modelSelection.model,
+                  verificationResult.usage,
+                  verificationResult.rawUsage
+                )
+              : this.usageTracker.buildExecutionUsageEvent(
+                  task,
+                  'cto',
+                  modelSelection.provider,
+                  modelSelection.model,
+                  {
+                    cost: verificationResult.cost,
+                    tokens_used: verificationResult.tokens_used,
+                    duration: verificationResult.duration,
+                    toolsUsed: verificationResult.toolsUsed,
+                    sessionId: verificationResult.sessionId
+                  }
+                );
+            await this.usageTracker.recordEvent(usageEvent);
+          }
 
           return verification;
         }
@@ -366,20 +826,44 @@ Respond in JSON format:
     }
 
     try {
-      const result = await this.agentExecutor.execute({
-        id: 'cto-analysis',
-        title: 'CTO Analysis',
-        description: prompt
-      }, modelSelection.provider, modelSelection.model);
+      const result = modelSelection.provider === 'openai' && this.openaiSdkExecutor
+        ? await this.openaiSdkExecutor.executePrompt(prompt, {
+            projectDir: process.cwd(),
+            identity: { name: 'CTO' },
+            employees: [],
+            model: modelSelection.model,
+            actorType: 'cto'
+          })
+        : await this._executeWithProvider(prompt, modelSelection.provider, modelSelection.model, 'cto');
 
       if (result.success && result.output) {
         const analysis = await this._parseAIResponse(result.output, options.schema || 'decision', options.systemPrompt);
 
-        // Track usage
-        this.modelSelector.resourceManager.trackCTOUsage(
-          modelSelection.provider,
-          result.messagesUsed || 1
-        );
+        if (this.usageTracker) {
+          const usageEvent = modelSelection.provider === 'openai' && result.usage
+            ? this.usageTracker.buildOpenAIUsageEvent(
+                { id: 'cto-ad-hoc', project_id: null, team_id: null },
+                'cto',
+                'openai',
+                modelSelection.model,
+                result.usage,
+                result.rawUsage
+              )
+            : this.usageTracker.buildExecutionUsageEvent(
+                { id: 'cto-ad-hoc', project_id: null, team_id: null },
+                'cto',
+                modelSelection.provider,
+                modelSelection.model,
+                {
+                  cost: result.cost,
+                  tokens_used: result.tokens_used,
+                  duration: result.duration,
+                  toolsUsed: result.toolsUsed,
+                  sessionId: result.sessionId
+                }
+              );
+          await this.usageTracker.recordEvent(usageEvent);
+        }
 
         return analysis;
       }
@@ -397,6 +881,10 @@ Respond in JSON format:
    */
   async _parseAIResponse(output, schema = 'decision', systemPrompt = null) {
     console.log('[CTO] Using GPT-4o-mini to extract JSON from AI output...');
+    try {
+      const direct = JSON.parse(output.trim().replace(/```json\s*/g, '').replace(/```\s*/g, '').trim());
+      if (direct && typeof direct === 'object') return direct;
+    } catch {}
     const extractorPrompt = systemPrompt || this._getExtractorSystemPrompt(schema);
     return await this._extractJsonWithGPT(output, extractorPrompt);
   }
@@ -456,12 +944,33 @@ Respond in JSON format:
         'If multiple JSON objects exist, choose the one with the required fields.'
       ].join(' ');
     }
+    if (schema === 'clarification') {
+      return [
+        'You are a strict JSON extractor.',
+        'Extract ONLY the single JSON object from the messy text.',
+        'Return ONLY raw JSON, no markdown, no commentary.',
+        'The JSON MUST include fields: canAnswer, answer, escalationNote.',
+        'canAnswer must be true or false.',
+        'If multiple JSON objects exist, choose the one with the required fields.'
+      ].join(' ');
+    }
+    if (schema === 'failure') {
+      return [
+        'You are a strict JSON extractor.',
+        'Extract ONLY the single JSON object from the messy text.',
+        'Return ONLY raw JSON, no markdown, no commentary.',
+        'The JSON MUST include fields: action, reasoning, comment.',
+        'The action field MUST be exactly one of: retry_execute, block_ceo.',
+        'If multiple JSON objects exist, choose the one with the required fields.'
+      ].join(' ');
+    }
     return [
       'You are a strict JSON extractor.',
       'Extract ONLY the single JSON object from the messy text.',
       'Return ONLY raw JSON, no markdown, no commentary.',
-      'The JSON MUST include fields: action, reasoning, complexity, confidence, strategy_note, subtasks.',
-      'The action field MUST be exactly one of: split, execute, defer.',
+      'The JSON MUST include fields: action, reasoning, confidence.',
+      'If present, include: complexity, strategy_note, subtasks, enhanced_description, estimatedMessages, recommendedProvider, critical_decision, critical_reason.',
+      'The action field MUST be exactly one of: enhance, split, defer, execute, clarify, retry_execute, block_ceo, approve, request_changes.',
       'Preserve the action value verbatim from the source (do not reinterpret).',
       'Preserve all subtask objects exactly as they appear in the source, including every field and value.',
       'Do not summarize, reword, or drop any subtask fields.',

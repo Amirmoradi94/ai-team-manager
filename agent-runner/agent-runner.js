@@ -6,6 +6,10 @@ const { exec } = require('child_process');
 const ioClient = require('socket.io-client');
 const TaskManagerAPI = require('./task-manager-api');
 const AgentExecutor = require('./agent-executor');
+const ClaudeAgentSdkExecutor = require('./claude-agent-sdk-executor');
+const OpenAIAgentSdkExecutor = require('./openai-agent-sdk-executor');
+const GoogleAdkExecutor = require('./google-adk-executor');
+const UsageTracker = require('./usage/UsageTracker');
 const config = require('./config.json');
 const { CTOEngine } = require('./cto');
 
@@ -14,6 +18,10 @@ class AgentRunner {
     const activeConfig = runtimeConfig || config;
     this.taskAPI = new TaskManagerAPI(activeConfig.taskManagerAPI);
     this.executor = new AgentExecutor(this.taskAPI);
+    this.sdkExecutor = new ClaudeAgentSdkExecutor(this.taskAPI);
+    this.openaiSdkExecutor = new OpenAIAgentSdkExecutor(this.taskAPI);
+    this.googleAdkExecutor = new GoogleAdkExecutor(this.taskAPI);
+    this.usageTracker = new UsageTracker(this.taskAPI);
     this.app = express();
     this.scheduledJobs = new Map();
     this.processedTaskIds = new Set();
@@ -29,12 +37,15 @@ class AgentRunner {
     // CTO Intelligence Layer with AI-powered decision-making
     this.cto = activeConfig.cto?.enabled
       ? new CTOEngine(
-          this.taskAPI,
-          activeConfig.cto,
-          path.join(__dirname, 'team_lead'),
-          this.executor,  // Pass executor so CTO can use AI models
-          null,
-          activeConfig
+        this.taskAPI,
+        activeConfig.cto,
+        path.join(__dirname, 'team_lead'),
+        this.executor,  // Pass executor so CTO can use AI models
+        null,
+        activeConfig,
+        this.usageTracker,
+        this.openaiSdkExecutor,
+        this.googleAdkExecutor
         )
       : null;
   }
@@ -47,6 +58,42 @@ class AgentRunner {
       return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
     } catch {
       return NaN;
+    }
+  }
+
+  async _recordUsageForExecution(task, decision, result, actorType = 'team_lead') {
+    if (!this.usageTracker || !result) return;
+    try {
+      const provider = decision?.provider === 'claude_sdk'
+        ? 'claude'
+        : decision?.provider === 'openai_sdk'
+          ? 'openai'
+          : decision?.provider;
+      const model = decision?.model || null;
+      const event = provider === 'openai'
+        ? this.usageTracker.buildOpenAIUsageEvent(
+            task,
+            actorType,
+            provider,
+            model,
+            result.usage,
+            result.rawUsage
+          )
+        : (result.usage || result.modelUsage)
+          ? this.usageTracker.buildClaudeUsageEvent(
+              task,
+              actorType,
+              provider,
+              model,
+              result.usage,
+              result.modelUsage,
+              result.rawUsage
+            )
+          : this.usageTracker.buildExecutionUsageEvent(task, actorType, provider, model, result);
+
+      await this.usageTracker.recordEvent(event);
+    } catch (e) {
+      console.warn('[Runner] Usage tracking failed:', e.message);
     }
   }
 
@@ -74,12 +121,9 @@ class AgentRunner {
     });
 
     this.socket.on('cto:refresh-resources', async () => {
+      // Health checks disabled by request
       if (!this.cto) return;
-      console.log('[CTO] Forced resource refresh requested');
-      await this.cto.refreshResourceStatus(true, this.executor);
-      const resourceStatus = this.cto.getResourceStatus();
-      await this.taskAPI.sendHeartbeat(this.runnerToken, resourceStatus);
-      console.log('[CTO] Forced resource refresh complete');
+      console.log('[CTO] Resource refresh requested (disabled)');
     });
   }
 
@@ -113,6 +157,7 @@ class AgentRunner {
         if (ctoSettings) this.cto.updateSettings(ctoSettings);
         await this.cto.loadState();
         console.log('[CTO] Intelligence layer active');
+        await this.cto.runHeartbeat();
       } catch (e) {
         console.log('[CTO] Failed to initialize, running without CTO:', e.message);
         this.cto = null;
@@ -124,6 +169,11 @@ class AgentRunner {
     // 3. Start Heartbeat Interval (every 30s)
     console.log('[Debug] Starting heartbeat interval...');
     setInterval(() => this.checkIn(), 30000);
+
+    // CTO proactive heartbeat (every 1 hour)
+    if (this.cto) {
+      setInterval(() => this.cto.runHeartbeat(), 60 * 60 * 1000);
+    }
 
     // 4. Resource status refresh is triggered on CTO tab open only.
     if (this.cto) {
@@ -166,9 +216,9 @@ class AgentRunner {
       const projects = await this.taskAPI.getRunnerProjects(this.runnerToken);
 
       // First, sync Runner Brain (global intelligence) - ALWAYS, even without projects
-      // Teams and specialists are global resources independent of projects
+      // Teams and employees are global resources independent of projects
       const payload = await this.taskAPI.getProjectInfo(this.runnerToken, projects[0]?.id);
-      await this.executor.syncRunnerBrain(payload.allSpecialists || [], payload.teams || []);
+      await this.executor.syncRunnerBrain(payload.allEmployees || [], payload.teams || []);
 
       // Then, sync lightweight project contexts for each project
       for (const project of projects) {
@@ -189,11 +239,8 @@ class AgentRunner {
 
   async checkIn() {
     try {
-      // Get latest resource status if CTO is enabled
-      const resourceStatus = this.cto ? this.cto.getResourceStatus() : null;
-      
       // Send heartbeat to server to show as "Online" in UI
-      await this.taskAPI.sendHeartbeat(this.runnerToken, resourceStatus);
+      await this.taskAPI.sendHeartbeat(this.runnerToken, null);
       // console.log(`[Runner] Heartbeat sent at ${new Date().toLocaleTimeString()}`);
     } catch (error) {
       console.error('[Runner] Heartbeat failed. Check your connection or token.');
@@ -211,6 +258,15 @@ class AgentRunner {
       for (const task of tasks) {
         // Skip if already being processed or scheduled in this runner instance
         if (this.processedTaskIds.has(task.id)) continue;
+
+        if ((task.status || '').toLowerCase() === 'blocked') {
+          try {
+            const meta = task.resource_metadata ? JSON.parse(task.resource_metadata) : {};
+            if (meta?.cto_event !== 'needs_clarification') continue;
+          } catch {
+            continue;
+          }
+        }
 
         // Respect scheduled date/time if set (local time)
         if (task.scheduled_date && task.scheduled_time) {
@@ -235,9 +291,9 @@ class AgentRunner {
 
         const payload = await this.taskAPI.getRunnerPayload(task.id);
 
-        // Sync Runner Brain before executing (ensures latest teams/specialists)
+        // Sync Runner Brain before executing (ensures latest teams/employees)
         const projectInfo = await this.taskAPI.getProjectInfo(this.runnerToken, payload.project.id);
-        await this.executor.syncRunnerBrain(projectInfo.allSpecialists || [], projectInfo.teams || []);
+        await this.executor.syncRunnerBrain(projectInfo.allEmployees || [], projectInfo.teams || []);
 
         // ===== CTO INTELLIGENCE LAYER =====
         if (this.cto && this.cto.enabled) {
@@ -273,6 +329,36 @@ class AgentRunner {
             continue;
           }
 
+          // ENHANCE: Update description and move to todo
+          if (decision.action === 'enhance') {
+            const aiAnalysis = decision.aiAnalysis || {};
+            const enhanced = aiAnalysis?.enhanced_description || this._buildEnhancedDescription(payload.task, aiAnalysis);
+            if (enhanced) {
+              await this.taskAPI.updateTask(task.id, { description: enhanced });
+            }
+            await this.taskAPI.changeTaskStatus(task.id, 'todo');
+            await this.cto.persistState();
+            continue;
+          }
+
+          // CLARIFY: CTO already posted clarification and rescheduled
+          if (decision.action === 'clarify') {
+            await this.cto.persistState();
+            continue;
+          }
+
+          // RETRY_EXECUTE: CTO rescheduled for next slot
+          if (decision.action === 'retry_execute') {
+            await this.cto.persistState();
+            continue;
+          }
+
+          // BLOCK_CEO: CTO blocked task
+          if (decision.action === 'block_ceo') {
+            await this.cto.persistState();
+            continue;
+          }
+
           // DEFER: Skip this task for now
           if (decision.action === 'defer') {
             console.log(`[CTO] Deferring task "${task.title}": ${decision.reason}`);
@@ -291,45 +377,216 @@ class AgentRunner {
           // Backlog tasks should never execute directly. Promote to todo first.
           if ((payload.task.status || '').toLowerCase() === 'backlog' && decision.action === 'execute') {
             console.log(`[CTO] Backlog task "${task.title}" requires CTO gate. Moving to todo for execution.`);
+
+            // Enrich description for Team Lead when CTO decides to execute without splitting
+            try {
+              const aiAnalysis = decision.aiAnalysis || null;
+              if (aiAnalysis) {
+                const currentDescription = payload.task.description || '';
+                if (!currentDescription.includes('## CTO Instructions')) {
+                  const subtask = Array.isArray(aiAnalysis.subtasks) ? aiAnalysis.subtasks[0] : null;
+                  const ctoBlock = [
+                    '## CTO Instructions',
+                    aiAnalysis.reasoning ? `**Reasoning:** ${aiAnalysis.reasoning}` : null,
+                    aiAnalysis.strategy_note ? `**Strategy Note:** ${aiAnalysis.strategy_note}` : null,
+                    subtask?.objective ? `**Objective:** ${subtask.objective}` : null,
+                    subtask?.inputs ? `**Inputs:** ${subtask.inputs}` : null,
+                    subtask?.guidelines ? `**Guidelines:** ${subtask.guidelines}` : null,
+                    subtask?.expectedOutput ? `**Expected Output:** ${subtask.expectedOutput}` : null,
+                    subtask?.estimatedDuration ? `**Estimated Duration:** ${subtask.estimatedDuration} minutes` : null,
+                    subtask?.complexity ? `**Complexity:** ${subtask.complexity}` : null
+                  ].filter(Boolean).join('\n\n');
+
+                  const updatedDescription = currentDescription
+                    ? `${currentDescription}\n\n${ctoBlock}`
+                    : ctoBlock;
+
+                  await this.taskAPI.updateTask(task.id, { description: updatedDescription });
+                }
+              }
+            } catch (e) {
+              console.warn('[CTO] Failed to enrich task description:', e.message);
+            }
+
             await this.taskAPI.changeTaskStatus(task.id, 'todo');
             continue;
           }
 
+          // If this is a subtask, ensure previous subtasks are completed before executing
+          if (await this._deferIfPriorSubtasksIncomplete(payload.task)) {
+            await this.cto.persistState();
+            continue;
+          }
+
           // EXECUTE: Run with CTO verification loop
+          // Move to in-progress immediately when execution starts
+          try {
+            await this.taskAPI.changeTaskStatus(task.id, 'in-progress');
+          } catch (e) {
+            console.warn('[CTO] Failed to move task to in-progress:', e.message);
+          }
+
           const reservationId = this.cto.reserveResources(decision.provider, decision.estimatedMessages || 12);
           let lastResult = null;
           let lastOutput = '';
           let passed = false;
+          let blockedByCapacity = false;
+          let capacityRetryUsed = false;
           const maxAttempts = this.cto.maxRetries + 1;
 
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
             console.log(`[CTO] Attempt ${attempt + 1}/${maxAttempts} for "${task.title}"`);
 
             // Build prompt (retry prompt if not first attempt)
-            let result;
-            if (attempt === 0) {
-              result = await this.executor.executeKanbanTask(
-                payload.task, payload.history, payload.identity, payload.specialists,
-                payload.project, payload.team, projectInfo.allSpecialists,
-                { provider: decision.provider, model: decision.model }
-              );
+          let result;
+          if (attempt === 0) {
+              if (decision.provider === 'claude_sdk') {
+                result = await this.sdkExecutor.executeKanbanTask(
+                  payload.task, payload.history, payload.identity, payload.employees,
+                  payload.project, payload.team, projectInfo.allEmployees,
+                  { provider: decision.provider, model: decision.model, thinking: decision.thinking }
+                );
+              } else if (decision.provider === 'gemini') {
+                result = await this.googleAdkExecutor.executeKanbanTask(
+                  payload.task, payload.history, payload.identity, payload.employees,
+                  payload.project, payload.team, projectInfo.allEmployees,
+                  { provider: decision.provider, model: decision.model, actorType: 'team_lead' }
+                );
+              } else if (decision.provider === 'openai_sdk') {
+                result = await this.openaiSdkExecutor.executeKanbanTask(
+                  payload.task, payload.history, payload.identity, payload.employees,
+                  payload.project, payload.team, projectInfo.allEmployees,
+                  { provider: decision.provider, model: decision.model, actorType: 'team_lead' }
+                );
+              } else {
+                result = await this.executor.executeKanbanTask(
+                  payload.task, payload.history, payload.identity, payload.employees,
+                  payload.project, payload.team, projectInfo.allEmployees,
+                  { provider: decision.provider, model: decision.model }
+                );
+              }
             } else {
               // Re-prompt with retry context
               const verification = await this.cto.verifyCompletion(payload.task, lastResult);
               const retryPrompt = this.cto.buildRetryPrompt(
                 payload.task, lastOutput, verification.missing, attempt
               );
-              result = await this.executor.executeTask(retryPrompt, {
-                provider: decision.provider,
-                model: decision.model,
-                mode: 'cli',
-                taskId: task.id,
-                workDir: payload.project.repository_path || process.cwd()
-              });
+              if (decision.provider === 'claude_sdk') {
+                result = await this.sdkExecutor.executePrompt(retryPrompt, {
+                  projectDir: payload.project.repository_path || process.cwd(),
+                  identity: payload.identity,
+                  employees: payload.employees,
+                  model: decision.model,
+                  thinking: decision.thinking
+                });
+              } else if (decision.provider === 'gemini') {
+                result = await this.googleAdkExecutor.executePrompt(retryPrompt, {
+                  projectDir: payload.project.repository_path || process.cwd(),
+                  identity: payload.identity,
+                  employees: payload.employees,
+                  model: decision.model,
+                  actorType: 'team_lead'
+                });
+              } else if (decision.provider === 'openai_sdk') {
+                result = await this.openaiSdkExecutor.executePrompt(retryPrompt, {
+                  projectDir: payload.project.repository_path || process.cwd(),
+                  identity: payload.identity,
+                  employees: payload.employees,
+                  model: decision.model,
+                  actorType: 'team_lead'
+                });
+              } else {
+                result = await this.executor.executeTask(retryPrompt, {
+                  provider: decision.provider,
+                  model: decision.model,
+                  mode: 'cli',
+                  taskId: task.id,
+                  workDir: payload.project.repository_path || process.cwd()
+                });
+              }
             }
 
             lastResult = result;
             lastOutput = result?.output || '';
+            await this._recordUsageForExecution(payload.task, decision, result, 'team_lead');
+
+            if (result?.needsApproval) {
+              const approvalDetails = (result.approvalRequests || [])
+                .map(r => `- ${r.tool_name || r.type || 'tool'} (${r.call_id || 'n/a'})`)
+                .join('\n') || 'Approval required for tool usage.';
+              const warningMsg = `CTO paused: Approval required before tool execution.\n${approvalDetails}`;
+              try {
+                await this.taskAPI.addComment(
+                  task.id,
+                  `To CEO:\n${warningMsg}`,
+                  true,
+                  { id: 'cto-system', name: 'CTO' }
+                );
+                await this.taskAPI.updateTask(task.id, {
+                  status: 'blocked',
+                  resource_metadata: JSON.stringify(this.cto._mergeResourceMetadata(task.resource_metadata, {
+                    cto_warning: warningMsg,
+                    cto_warning_at: new Date().toISOString()
+                  }))
+                });
+              } catch (e) {
+                console.warn('[CTO] Failed to mark approval-required task:', e.message);
+              }
+              blockedByCapacity = true;
+              break;
+            }
+
+            // Detect provider capacity/quota errors and block the task with CEO attention
+            const capacityError = this._detectCapacityError(lastOutput);
+            if (capacityError) {
+              if (!capacityRetryUsed) {
+                capacityRetryUsed = true;
+                console.warn(`[CTO] Capacity error detected. Retrying once after backoff: ${capacityError}`);
+                await this.executor.sleep(2000);
+                continue;
+              }
+
+              const warningMsg = `CTO paused: AI provider unavailable (${capacityError}). Task requires AI to proceed.`;
+              try {
+                await this.taskAPI.updateTask(task.id, {
+                  status: 'blocked',
+                  resource_metadata: JSON.stringify({
+                    cto_warning: warningMsg,
+                    cto_warning_at: new Date().toISOString()
+                  })
+                });
+                await this.taskAPI.addComment(
+                  task.id,
+                  `To CEO:\n${warningMsg}`,
+                  true,
+                  { id: 'cto-system', name: 'CTO' }
+                );
+              } catch (e) {
+                console.warn('[CTO] Failed to mark task blocked after capacity error:', e.message);
+              }
+              blockedByCapacity = true;
+              break;
+            }
+
+            // Detect clarification request
+            if (this._detectClarificationRequest(lastOutput)) {
+              await this.taskAPI.updateTask(task.id, {
+                status: 'blocked',
+                resource_metadata: JSON.stringify({
+                  cto_event: 'needs_clarification',
+                  cto_warning: 'Team Lead requested clarification.',
+                  cto_warning_at: new Date().toISOString()
+                })
+              });
+              await this.taskAPI.addComment(
+                task.id,
+                `To CEO:\nTeam Lead requested clarification.\n\n${this._extractClarification(lastOutput)}`,
+                true,
+                { id: 'cto-system', name: 'CTO' }
+              );
+              blockedByCapacity = true;
+              break;
+            }
 
             // Verify completion
             const verification = await this.cto.verifyCompletion(payload.task, result);
@@ -353,8 +610,8 @@ class AgentRunner {
               this.cto.releaseReservation(reservationId);
 
               // Record strategic outcome for CTO memory (high-level only, no tech details)
-              if (this.cto.taskHistory) {
-                  await this.cto.taskHistory.recordOutcome({
+              if (this.cto) {
+                  await this.cto.recordOutcome({
                     taskId: task.id,
                     title: task.title,
                     taskType: payload.task.task_type || 'task',
@@ -394,15 +651,15 @@ class AgentRunner {
             }
           }
 
-          // If all attempts failed, escalate
-          if (!passed) {
+          // If all attempts failed, move to blocked (no for-review on failures)
+          if (!passed && !blockedByCapacity) {
             this.cto.releaseReservation(reservationId);
             this.cto.recordUsage(decision.provider, (decision.estimatedMessages || 5) * maxAttempts, task.id);
 
             // Record strategic outcome for CTO memory (high-level only)
-            if (this.cto.taskHistory) {
+            if (this.cto) {
               const verification = await this.cto.verifyCompletion(payload.task, lastResult);
-                await this.cto.taskHistory.recordOutcome({
+                await this.cto.recordOutcome({
                   taskId: task.id,
                   title: task.title,
                   taskType: payload.task.task_type || 'task',
@@ -417,21 +674,21 @@ class AgentRunner {
                 });
               }
 
-            await this.taskAPI.markTaskForReviewWithMetadata(task.id, {
-              execution_time: lastResult?.duration,
-              tokens_used: lastResult?.tokens_used,
-              model_used: decision.provider,
-              execution_started_at: new Date(Date.now() - (lastResult?.duration || 0)).toISOString(),
-              execution_completed_at: new Date().toISOString(),
-              completion_report: `**ESCALATED TO CEO** - Task failed after ${maxAttempts} attempts.\n\nLast output summary:\n${this.cto._summarizeOutput(lastOutput, 1000)}`
+            await this.taskAPI.updateTask(task.id, {
+              status: 'backlog',
+              resource_metadata: JSON.stringify({
+                cto_event: 'execution_failed',
+                cto_warning: `Team Lead failed after ${maxAttempts} attempts.`,
+                cto_warning_at: new Date().toISOString()
+              })
             });
             await this.taskAPI.addComment(
               task.id,
-              `To CEO:\nExecution failed and escalated for review.\n- Provider: ${decision.provider}\n- Attempts: ${maxAttempts}/${maxAttempts}\n\nLast output summary:\n${this.cto._summarizeOutput(lastOutput, 1000)}`,
+              `To CEO:\nExecution failed. Task returned to backlog for CTO review.\n- Provider: ${decision.provider}\n- Attempts: ${maxAttempts}/${maxAttempts}\n\nLast output summary:\n${this.cto._summarizeOutput(lastOutput, 1000)}`,
               true,
               { id: 'cto-system', name: 'CTO' }
             );
-            console.log(`[CTO] Task ${task.id} escalated to CEO (for-review with failure report)`);
+            console.log(`[CTO] Task ${task.id} returned to backlog after failed execution.`);
           }
 
           await this.cto.persistState();
@@ -439,10 +696,19 @@ class AgentRunner {
         }
 
         // ===== FALLBACK: No CTO, execute directly (legacy behavior) =====
+        if (await this._deferIfPriorSubtasksIncomplete(payload.task)) {
+          continue;
+        }
+        try {
+          await this.taskAPI.changeTaskStatus(task.id, 'in-progress');
+        } catch (e) {
+          console.warn('[Runner] Failed to move task to in-progress:', e.message);
+        }
         const result = await this.executor.executeKanbanTask(
-          payload.task, payload.history, payload.identity, payload.specialists,
-          payload.project, payload.team, projectInfo.allSpecialists
+          payload.task, payload.history, payload.identity, payload.employees,
+          payload.project, payload.team, projectInfo.allEmployees
         );
+        await this._recordUsageForExecution(payload.task, { provider: 'auto', model: null }, result, 'team_lead');
 
         // Update task status and post results
         if (result && result.success) {
@@ -485,6 +751,45 @@ class AgentRunner {
     }
   }
 
+  _detectCapacityError(output = '') {
+    const text = String(output).toLowerCase();
+    const patterns = [
+      'exhausted your capacity',
+      'quota',
+      'rate limit',
+      'capacity',
+      'insufficient_quota',
+      'billing',
+      'credit balance is too low',
+      'too many requests'
+    ];
+    return patterns.find(p => text.includes(p)) || null;
+  }
+
+  _detectClarificationRequest(output = '') {
+    const text = String(output);
+    return text.includes('---NEEDS_CLARIFICATION---');
+  }
+
+  _extractClarification(output = '') {
+    const text = String(output);
+    const match = text.match(/---NEEDS_CLARIFICATION---([\s\S]*?)---END_CLARIFICATION---/);
+    return match ? match[1].trim() : text.slice(0, 1000);
+  }
+
+  _buildEnhancedDescription(task, aiAnalysis = {}) {
+    const sub = Array.isArray(aiAnalysis.subtasks) ? aiAnalysis.subtasks[0] : null;
+    const parts = [];
+    parts.push(task.description || '');
+    if (aiAnalysis.reasoning) parts.push(`CTO Reasoning: ${aiAnalysis.reasoning}`);
+    if (aiAnalysis.strategy_note) parts.push(`CTO Strategy: ${aiAnalysis.strategy_note}`);
+    if (sub?.objective) parts.push(`Objective: ${sub.objective}`);
+    if (sub?.inputs) parts.push(`Inputs: ${sub.inputs}`);
+    if (sub?.guidelines) parts.push(`Guidelines: ${sub.guidelines}`);
+    if (sub?.expectedOutput) parts.push(`Expected Output: ${sub.expectedOutput}`);
+    return parts.filter(Boolean).join('\n\n');
+  }
+
   async reviewTasks() {
     if (this.isReviewing || !this.cto) return;
     this.isReviewing = true;
@@ -494,8 +799,7 @@ class AgentRunner {
       for (const project of projects) {
         const tasks = await this.taskAPI.getTasksByStatus(project.id, 'for-review');
         for (const task of tasks) {
-          // Only review if it was a subtask or delegated by CTO
-          if (task.task_type !== 'subtask' && !task.parent_id) continue;
+          if (!this.cto || this.cto.autonomyLevel !== 'full') continue;
           
           console.log(`[CTO] Watcher: Reviewing task "${task.title}"...`);
           const payload = await this.taskAPI.getRunnerPayload(task.id);
@@ -507,6 +811,61 @@ class AgentRunner {
     } finally {
       this.isReviewing = false;
     }
+  }
+
+  async _deferIfPriorSubtasksIncomplete(task) {
+    try {
+      if (!task?.parent_id || !task.scheduled_date || !task.scheduled_time) return false;
+      const scheduledAt = new Date(`${task.scheduled_date}T${task.scheduled_time}`);
+      if (Number.isNaN(scheduledAt.getTime()) || scheduledAt > new Date()) return false;
+
+      const siblings = await this.taskAPI.getSubtasks(task.parent_id);
+      if (!Array.isArray(siblings) || siblings.length === 0) return false;
+
+      const currentTime = scheduledAt.getTime();
+      const doneStatuses = new Set(['done', 'completed', 'cancelled', 'archived']);
+      const hasIncompletePrior = siblings.some(s => {
+        if (!s.scheduled_date || !s.scheduled_time) return false;
+        const siblingTime = new Date(`${s.scheduled_date}T${s.scheduled_time}`).getTime();
+        if (Number.isNaN(siblingTime)) return false;
+        return siblingTime < currentTime && !doneStatuses.has(String(s.status || '').toLowerCase());
+      });
+
+      if (!hasIncompletePrior) return false;
+
+      const deferUntil = new Date(Date.now() + 30 * 60 * 1000);
+      const deferDate = this._formatLocalDate(deferUntil);
+      const deferTime = this._formatLocalTime(deferUntil);
+
+      await this.taskAPI.updateTask(task.id, {
+        scheduled_date: deferDate,
+        scheduled_time: deferTime
+      });
+      await this.taskAPI.addComment(
+        task.id,
+        `To CEO:\nCTO deferred execution until ${deferDate} ${deferTime} because a previous subtask is still incomplete.`,
+        true,
+        { id: 'cto-system', name: 'CTO' }
+      );
+      console.log(`[CTO] Deferred subtask ${task.id} because previous subtask is incomplete.`);
+      return true;
+    } catch (e) {
+      console.warn('[CTO] Failed to defer subtask due to dependency check:', e.message);
+      return false;
+    }
+  }
+
+  _formatLocalDate(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  _formatLocalTime(date) {
+    const h = String(date.getHours()).padStart(2, '0');
+    const m = String(date.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
   }
 
   startWebhookServer() {
@@ -551,7 +910,7 @@ class AgentRunner {
       
       // Sync Runner Brain before executing
       const projectInfo = await this.taskAPI.getProjectInfo(this.runnerToken, payload.project.id);
-      await this.executor.syncRunnerBrain(projectInfo.allSpecialists || [], projectInfo.teams || []);
+      await this.executor.syncRunnerBrain(projectInfo.allEmployees || [], projectInfo.teams || []);
 
       if (this.cto && this.cto.enabled) {
         // ... (CTO logic will be picked up by the next poll cycle or we can trigger it here)
@@ -562,7 +921,7 @@ class AgentRunner {
           payload.task,
           payload.history,
           payload.identity,
-          payload.specialists,
+          payload.employees,
           payload.project
         );
       }

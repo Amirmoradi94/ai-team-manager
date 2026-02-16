@@ -139,20 +139,24 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
             className="relative w-full max-w-lg z-10"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="glass-card-dark p-6 glow-border max-h-[85vh] overflow-y-auto overflow-x-hidden custom-scrollbar">
-              <div className="flex items-center justify-between mb-6 sticky top-0 bg-background/80 backdrop-blur-md z-10 pb-2">
-                <h2 className="text-xl font-semibold text-foreground">{editingTask ? 'Edit Task' : 'Create New Task'}</h2>
+            <div className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900/80 via-slate-900/50 to-teal-900/30 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] max-h-[85vh] overflow-y-auto overflow-x-hidden custom-scrollbar">
+              <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-teal-500/15 blur-3xl" />
+              <div className="flex items-center justify-between mb-6 sticky top-0 bg-slate-900/70 backdrop-blur-md z-10 pb-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-teal-200/80">Execution Order</p>
+                  <h2 className="text-xl font-semibold text-foreground">{editingTask ? 'Edit Task' : 'Create New Task'}</h2>
+                </div>
                 <button
                   onClick={onClose}
-                  className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+                  className="p-2 rounded-lg border border-transparent hover:border-teal-500/40 hover:bg-slate-900/60 transition-colors text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={handleSubmit} className="space-y-5 relative z-10">
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                     Title
                   </label>
                   <Input
@@ -160,12 +164,12 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Enter task title..."
                     required
-                    className="bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
+                    className="bg-slate-900/70 border border-teal-500/20 focus-visible:ring-1 focus-visible:ring-teal-400/60"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                     Description
                   </label>
                   <RichTextEditor
@@ -179,11 +183,11 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                       Priority
                     </label>
                     <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
+                      <SelectTrigger className="bg-slate-900/70 border border-teal-500/20 focus:ring-1 focus:ring-teal-400/60 focus:ring-offset-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -196,11 +200,11 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                       Status
                     </label>
                     <Select value={status} onValueChange={(v) => setStatus(v as Status)}>
-                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
+                      <SelectTrigger className="bg-slate-900/70 border border-teal-500/20 focus:ring-1 focus:ring-teal-400/60 focus:ring-offset-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -216,11 +220,11 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                       Project
                     </label>
                     <Select value={projectId} onValueChange={(val) => setProjectId(val === 'none' ? '' : val)}>
-                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
+                      <SelectTrigger className="bg-slate-900/70 border border-teal-500/20 focus:ring-1 focus:ring-teal-400/60 focus:ring-offset-0">
                         <SelectValue placeholder="Select project..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -233,7 +237,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                       Team
                     </label>
                     <Select value={teamId || agentId || assigneeId} onValueChange={(val) => {
@@ -254,7 +258,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                         setTeamId('');
                       }
                     }}>
-                      <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
+                      <SelectTrigger className="bg-slate-900/70 border border-teal-500/20 focus:ring-1 focus:ring-teal-400/60 focus:ring-offset-0">
                         <SelectValue placeholder="Select assignee..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -299,7 +303,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                     {teamId && teams && (() => {
                       const selectedTeam = teams.find(t => t.id === teamId);
                       return selectedTeam?.lead ? (
-                        <p className="mt-2 text-xs text-primary flex items-center gap-1">
+                        <p className="mt-2 text-xs text-teal-200/80 flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           Team lead "{selectedTeam.lead.name}" auto-assigned
                         </p>
@@ -309,15 +313,15 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2 flex items-center gap-2">
-                    <CalendarIcon className="w-4 h-4 text-primary" />
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2 flex items-center gap-2">
+                    <CalendarIcon className="w-4 h-4 text-teal-300" />
                     Deadline
                   </label>
                   <Popover open={isDeadlineCalendarOpen} onOpenChange={setIsDeadlineCalendarOpen}>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
-                        className="w-full justify-start text-left font-normal bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0"
+                        className="w-full justify-start text-left font-normal bg-slate-900/70 border border-teal-500/20 focus-visible:ring-1 focus-visible:ring-teal-400/60 focus-visible:ring-offset-0"
                         onClick={() => setIsDeadlineCalendarOpen(true)}
                       >
                         <CalendarIcon className="mr-2 h-4 w-4" />
@@ -340,14 +344,14 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                       Scheduled Date (Optional)
                     </label>
                     <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                       <PopoverTrigger asChild>
                         <Button
                           variant="outline"
-                          className="w-full justify-start text-left font-normal bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0"
+                          className="w-full justify-start text-left font-normal bg-slate-900/70 border border-teal-500/20 focus-visible:ring-1 focus-visible:ring-teal-400/60 focus-visible:ring-offset-0"
                           onClick={() => setIsCalendarOpen(true)}
                         >
                           <CalendarIcon className="mr-2 h-4 w-4" />
@@ -369,7 +373,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-teal-200/80 mb-2">
                       Scheduled Time
                     </label>
                     {isCustomTimeActive ? (
@@ -379,13 +383,13 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                           type="time"
                           value={scheduledTime}
                           onChange={(e) => setScheduledTime(e.target.value)}
-                          className="bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary flex-1"
+                          className="bg-slate-900/70 border border-teal-500/20 focus-visible:ring-1 focus-visible:ring-teal-400/60 flex-1"
                         />
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => setIsCustomTimeActive(false)}
-                          className="shrink-0 h-10 px-3"
+                          className="shrink-0 h-10 px-3 bg-slate-900/70 border border-teal-500/20"
                         >
                           <Clock className="mr-2 h-4 w-4" /> List
                         </Button>
@@ -406,8 +410,8 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                           }
                         }}
                       >
-                        <SelectTrigger className="bg-secondary border-0 focus:ring-1 focus:ring-primary focus:ring-offset-0">
-                          <SelectValue placeholder="Pick a time">
+                      <SelectTrigger className="bg-slate-900/70 border border-teal-500/20 focus:ring-1 focus:ring-teal-400/60 focus:ring-offset-0">
+                        <SelectValue placeholder="Pick a time">
                             {scheduledTime ? (
                               <div className="flex items-center">
                                 <Clock className="mr-2 h-4 w-4" />
@@ -443,13 +447,13 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit, teamMembers, projec
                     type="button"
                     variant="outline"
                     onClick={onClose}
-                    className="flex-1 border-border hover:border-primary/50"
+                    className="flex-1 border border-teal-500/30 bg-slate-900/70 text-teal-100 hover:border-teal-300/70"
                   >
                     Cancel
                   </Button>
                   <Button
                     type="submit"
-                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+                    className="flex-1 bg-teal-500/90 hover:bg-teal-500 text-slate-900 font-semibold"
                   >
                     {editingTask ? 'Update Task' : 'Create Task'}
                   </Button>

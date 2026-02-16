@@ -1,2 +1,3 @@
-Event Name | Category | Properties | Trigger | Notes
----------- | -------- | ---------- | ------- | -----
+# analytics-tracking
+
+No description found

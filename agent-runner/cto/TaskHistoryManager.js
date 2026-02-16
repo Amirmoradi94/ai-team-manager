@@ -1,6 +1,5 @@
 const fs = require('fs').promises;
 const path = require('path');
-const os = require('os');
 
 /**
  * TaskHistoryManager - Strategic CTO Memory
@@ -24,7 +23,7 @@ class TaskHistoryManager {
     // CTO history files (in cto/state/ directory, not runner_brain)
     this.historyFile = path.join(brainDir, 'TASK_HISTORY.md');
     this.summaryFile = path.join(brainDir, 'STRATEGIC_SUMMARY.json');
-    this.mycompanyHistoryFile = path.join(os.homedir(), 'mycompany', 'cto', 'TASK_HISTORY.md');
+    this.mycompanyHistoryFile = path.resolve(__dirname, '..', '..', 'mycompany', 'cto', 'TASK_HISTORY.md');
 
     // In-memory cache for fast lookups
     this.history = [];

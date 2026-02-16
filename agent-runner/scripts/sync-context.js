@@ -3,7 +3,7 @@
 /**
  * Context Sync Script
  *
- * Synchronizes the task-manager database with the ~/mycompany/ directory.
+ * Synchronizes the task-manager database with the repo-local mycompany/ directory.
  * Called automatically by the backend when entities change, or manually via:
  *   npm run sync-context
  */

@@ -6,6 +6,7 @@ const ProviderIntelligence = require('./ProviderIntelligence');
 const TaskHistoryManager = require('./TaskHistoryManager');
 const ModelSelector = require('./ModelSelector');
 const AIDecisionEngine = require('./AIDecisionEngine');
+const ProactiveMemory = require('./ProactiveMemory');
 
 const MESSAGE_ESTIMATES = { simple: 5, moderate: 12, complex: 25, epic: 50 };
 
@@ -29,7 +30,7 @@ const STRATEGIES = {
 };
 
 class CTOEngine {
-  constructor(taskAPI, ctoConfig, teamLeadDir, agentExecutor = null, dbPath = null, runnerConfig = null) {
+  constructor(taskAPI, ctoConfig, teamLeadDir, agentExecutor = null, dbPath = null, runnerConfig = null, usageTracker = null, openaiSdkExecutor = null, googleAdkExecutor = null) {
     this.taskAPI = taskAPI;
     this.teamLeadDir = teamLeadDir; // Team lead directory (for context only, CTO doesn't use it)
     this.config = ctoConfig || {};
@@ -43,6 +44,9 @@ class CTOEngine {
     // CEO Controls
     this.strategy = ctoConfig?.strategy || 'balanced';
     this.autonomyLevel = ctoConfig?.autonomyLevel || 'full'; // 'full', 'oversight'
+    this.ctoProviderMode = ctoConfig?.ctoProviderMode || 'claude_api';
+    this.ctoModel = ctoConfig?.ctoModel || 'claude-opus-4-5-20251101';
+    this.teamLeadExecutionMode = ctoConfig?.teamLeadExecutionMode || 'claude_sdk';
 
     // Apply strategy settings
     const strat = STRATEGIES[this.strategy] || STRATEGIES.balanced;
@@ -52,6 +56,18 @@ class CTOEngine {
 
     // CTO's own provider for verification calls
     this.ctoProvider = ctoConfig?.ctoProvider || 'gemini-3-pro';
+    this.costBudgets = ctoConfig?.costBudgets || {
+      perTaskUsd: 2.5,
+      perTeamDailyUsd: 25,
+      perProjectWeeklyUsd: 120
+    };
+    this.usageTracker = usageTracker;
+    this.openaiSdkExecutor = openaiSdkExecutor;
+    this.googleAdkExecutor = googleAdkExecutor;
+    this.proactiveMemory = new ProactiveMemory(
+      path.resolve(__dirname, '..', '..', 'mycompany', 'cto'),
+      path.join(__dirname, 'proactive-assets')
+    );
 
     // CTO's own directories (separate from team leads)
     const ctoDir = path.join(__dirname); // agent-runner/cto/
@@ -68,7 +84,7 @@ class CTOEngine {
 
     // AI-powered decision engine (uses Gemini Pro, Claude Opus, or GPT-5.2)
     if (agentExecutor) {
-      this.aiEngine = new AIDecisionEngine(this.modelSelector, agentExecutor);
+      this.aiEngine = new AIDecisionEngine(this.modelSelector, agentExecutor, usageTracker, openaiSdkExecutor, googleAdkExecutor);
     }
 
     // CTO decision log (in CTO's own directory, not team leads')
@@ -87,7 +103,7 @@ class CTOEngine {
           return;
         }
 
-        db.all('SELECT id, name, description, tools FROM specialists ORDER BY name', [], (err, rows) => {
+        db.all('SELECT id, name, description, tools, model_claude, model_gemini, model_openai FROM specialists ORDER BY name', [], (err, rows) => {
           db.close();
 
           if (err) {
@@ -109,6 +125,10 @@ class CTOEngine {
     if (settings.enabled !== undefined) this.enabled = settings.enabled;
 
     if (settings.ctoProvider) this.ctoProvider = settings.ctoProvider;
+    if (settings.ctoProviderMode) this.ctoProviderMode = settings.ctoProviderMode;
+    if (settings.ctoModel) this.ctoModel = settings.ctoModel;
+    if (settings.teamLeadExecutionMode) this.teamLeadExecutionMode = settings.teamLeadExecutionMode;
+    if (settings.costBudgets) this.costBudgets = { ...this.costBudgets, ...settings.costBudgets };
 
     // Handle CEO Controls
     if (settings.strategy && STRATEGIES[settings.strategy]) {
@@ -155,6 +175,7 @@ class CTOEngine {
   async loadState() {
     await this.resourceManager.loadState();
     await this.taskHistory.loadState();
+    await this.proactiveMemory.ensureStructure();
     const insights = this.taskHistory.getInsights();
     console.log('[CTO] State loaded. Resource status:', JSON.stringify(this.resourceManager.getStatus(), null, 0).substring(0, 200));
     console.log(`[CTO] Task history: ${this.taskHistory.summary.totalTasks} tasks, ${Math.round(this.taskHistory.summary.successRate)}% success rate`);
@@ -176,12 +197,8 @@ class CTOEngine {
    * Refresh resource status from external monitors (cmonitor, gcloud)
    */
   async refreshResourceStatus(forceCheck = false, executor = null) {
-    if (forceCheck && executor) {
-      await this.resourceManager.checkExternalStatusWithExecutor(executor, 'hello');
-    } else {
-      await this.resourceManager.checkExternalStatus();
-    }
-    await this.resourceManager.persistState();
+    // Health checks disabled by request
+    return;
   }
 
   // ========== EVALUATION PHASE ==========
@@ -194,18 +211,24 @@ class CTOEngine {
    * 3. SCHEDULES (defers to a better time)
    */
   async evaluate(task, payload) {
-    // Task-level resource check (independent of CTO dashboard refresh)
-    try {
-      const now = Date.now();
-      if (this.executor && (!this.lastTaskResourceCheckAt || now - this.lastTaskResourceCheckAt > 2 * 60 * 1000)) {
-        await this.resourceManager.checkExternalStatusWithExecutor(this.executor, 'hello');
-        this.lastTaskResourceCheckAt = now;
-      }
-    } catch (e) {
-      console.warn('[CTO] Task resource check failed:', e.message);
-    }
+    // Task-level resource check disabled
     const { title, description, scheduled_date, scheduled_time, priority } = task;
     const identity = payload?.identity || {};
+    let meta = {};
+    try {
+      meta = task.resource_metadata ? JSON.parse(task.resource_metadata) : {};
+    } catch {}
+    const ctoEvent = meta?.cto_event;
+
+    // Scenario 2: blocked for clarification
+    if ((task.status || '').toLowerCase() === 'blocked' && ctoEvent === 'needs_clarification') {
+      return await this._handleClarification(task, payload);
+    }
+
+    // Scenario 3: team lead failed and returned to backlog
+    if ((task.status || '').toLowerCase() === 'backlog' && ctoEvent === 'execution_failed') {
+      return await this._handleExecutionFailure(task, payload);
+    }
 
     // 1. Check for CEO Explicit Schedule (Yes Sir path)
     if (scheduled_date && scheduled_time) {
@@ -226,6 +249,11 @@ class CTOEngine {
     const deadline = task.due_date ? new Date(task.due_date) : this._inferDeadline(priority);
     const resourceStatus = this.resourceManager.getStatus();
     const activeTasksUntilDeadline = await this._countActiveTasksUntil(deadline, task.id);
+    const usageSummary24h = await this._getUsageSummary(task, 24);
+    const usageSummary7d = await this._getUsageSummary(task, 24 * 7);
+    const taskUsage7d = await this._getUsageSummary(task, 24 * 7, { taskId: task.id });
+    const budgetStatus = this._evaluateBudgetStatus(task, usageSummary24h, usageSummary7d, taskUsage7d);
+    await this._maybeWarnBudget(task, budgetStatus);
 
     // 3. Load available employees from database
     const employees = await this.getEmployees();
@@ -234,60 +262,114 @@ class CTOEngine {
     // AI-powered analysis (Always used)
     if (this.aiEngine) {
       const context = {
-        availableProviders: ['claude', 'gemini', 'codex'],
+        availableProviders: ['claude', 'gemini', 'codex', 'openai'],
         resourceStatus: resourceStatus, // This contains the 'cmonitor' ground truth
         historicalData: this.taskHistory.getInsights(),
         deadline: deadline,
         activeTasksUntilDeadline: activeTasksUntilDeadline,
         priority: priority || 'medium',
         employees: employees, // Pass employees to AI for decision-making
-        team: payload?.team || null
+        team: payload?.team || null,
+        costUsage: {
+          last24h: usageSummary24h,
+          last7d: usageSummary7d,
+          taskLast7d: taskUsage7d,
+          budgetStatus
+        }
       };
 
-      const aiAnalysis = await this.aiEngine.analyzeTask(task, context);
+      const ctoProvider = this._getProviderFromCTOConfig();
+      let aiAnalysis = null;
+      if (ctoProvider === 'claude') {
+        aiAnalysis = await this.aiEngine.analyzeTaskWithClaudeApi(task, context, this._getCtoModel());
+      } else if (ctoProvider === 'openai') {
+        aiAnalysis = await this.aiEngine.analyzeTaskWithOpenAI(task, context, this._getCtoModel());
+      } else {
+        aiAnalysis = await this.aiEngine.analyzeTaskWithProvider(task, context, 'gemini', this._getCtoModel());
+      }
+      await this._recordAiUsage(task, aiAnalysis);
 
       if (aiAnalysis) {
         // Enforce strict delegation: Only assign to Team Lead
         const teamLeadId = payload?.team?.lead?.id;
         const action = typeof aiAnalysis.action === 'string' ? aiAnalysis.action.toLowerCase() : 'assign';
+        const isCritical = aiAnalysis.critical_decision === true;
+        const criticalReason = aiAnalysis.critical_reason || 'strategic';
+
+        if (isCritical) {
+          const warningMsg = `CTO paused: Critical decision requires CEO approval (${criticalReason}).`;
+          await this._flagCriticalDecision(task, warningMsg);
+          const decision = {
+            action: 'defer',
+            reason: warningMsg,
+            confidence: aiAnalysis.confidence || 0,
+            aiPowered: true,
+            critical_decision: true,
+            critical_reason: criticalReason,
+            aiAnalysis
+          };
+          await this._logDecision(task, decision);
+          return decision;
+        }
         
         // Decision Logic
+        if (action === 'enhance') {
+          const decision = {
+            action: 'enhance',
+            reason: aiAnalysis.reasoning,
+            confidence: aiAnalysis.confidence,
+            aiPowered: true,
+            aiAnalysis: aiAnalysis,
+            critical_decision: false
+          };
+          await this._logDecision(task, decision);
+          return decision;
+        }
+
         if (action === 'split') {
-           const decision = {
+          const decision = {
             action: 'split',
             reason: aiAnalysis.reasoning,
             confidence: aiAnalysis.confidence,
             complexity: { level: aiAnalysis.complexity, score: this._complexityToScore(aiAnalysis.complexity) },
             aiPowered: true,
-            aiAnalysis: aiAnalysis
+            aiAnalysis: aiAnalysis,
+            critical_decision: false
           };
           await this._logDecision(task, decision);
           return decision;
         }
 
         if (action === 'defer') {
-           const decision = {
+          const decision = {
             action: 'defer',
             reason: aiAnalysis.reasoning,
             confidence: aiAnalysis.confidence,
             deferUntil: new Date(Date.now() + 4 * 60 * 60 * 1000), // Default 4h deferral
-            aiPowered: true
+            aiPowered: true,
+            critical_decision: false
           };
           await this._logDecision(task, decision);
           return decision;
         }
 
         // Default to Assign/Execute
+        const preferredProvider = this._getTeamLeadProviderFromCTO();
+        const preferredModel = this._getTeamLeadModel(preferredProvider);
+        const thinking = this._getTeamLeadThinking(preferredProvider);
+
         const decision = {
           action: 'assign',
           assignee_id: teamLeadId, // Always delegate to Team Lead
-          provider: aiAnalysis.recommendedProvider || 'claude',
-          model: this._getModelForProvider(aiAnalysis.recommendedProvider || 'claude'),
+          provider: preferredProvider,
+          model: preferredModel,
+          thinking: thinking,
           reason: `AI Analysis: ${aiAnalysis.reasoning}. Assigned to Team Lead for execution.`,
           confidence: aiAnalysis.confidence,
           estimatedMessages: aiAnalysis.estimatedMessages || 12,
           complexity: { level: aiAnalysis.complexity, score: this._complexityToScore(aiAnalysis.complexity) },
-          aiPowered: true
+          aiPowered: true,
+          critical_decision: false
         };
 
         await this._logDecision(task, decision);
@@ -364,7 +446,7 @@ class CTOEngine {
 
     const context = {
       employees: employees,
-      availableProviders: ['claude', 'gemini', 'codex'],
+      availableProviders: ['claude', 'gemini', 'codex', 'openai'],
       resourceStatus: this.resourceManager.getStatus(),
       historicalData: this.taskHistory.getInsights(),
       deadline: task.due_date ? new Date(task.due_date) : null,
@@ -411,7 +493,10 @@ class CTOEngine {
 
     // Determine strict task directory
     const safeTitle = task.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const taskDir = `tasks/${safeTitle}`;
+    const projectRepoPath = payload?.project?.repository_path || '';
+    const taskDir = projectRepoPath
+      ? path.join(projectRepoPath, 'tasks', safeTitle)
+      : `tasks/${safeTitle}`;
 
     for (let i = 0; i < subtasksData.length; i++) {
       const sub = subtasksData[i];
@@ -432,14 +517,14 @@ class CTOEngine {
       const deadlineStr = subtaskDeadline.toISOString().split('T')[0];
 
       // Build paths for context files (only relevant ones)
-      const companyDir = path.join(require('os').homedir(), 'mycompany');
+      const companyDir = path.resolve(__dirname, '..', '..', 'mycompany');
       const projectSlug = projectName ? projectName.toLowerCase().replace(/[^a-z0-9]+/g, '_') : null;
       const teamSlug = teamName ? teamName.toLowerCase().replace(/[^a-z0-9]+/g, '_') : null;
 
       // Get team members (employees assigned to this team)
-      const teamMembers = (payload?.team?.specialists && payload.team.specialists.length > 0)
-        ? payload.team.specialists
-        : (payload?.specialists || []);
+      const teamMembers = (payload?.team?.employees && payload.team.employees.length > 0)
+        ? payload.team.employees
+        : (payload?.employees || []);
       const teamMembersList = teamMembers.length > 0
         ? teamMembers.map(emp => `- **${emp.name}**: ${emp.description || 'No description'}`).join('\n')
         : '_No specific employees assigned to this team_';
@@ -459,7 +544,7 @@ ${task.description ? `**Parent Task Description:**\n${task.description.substring
 
 ## 📂 Output Directory
 
-\`${taskDir}\` (Create if not exists)
+\`${taskDir}\` (Create if not exists inside the project directory)
 
 **CRITICAL**: All artifacts (code, configs, docs) must be saved in this directory.
 
@@ -1152,10 +1237,272 @@ Please address the issues above and resubmit for review.
 
       await this.taskAPI.addComment(task.id, feedback);
       
+      const blockedIntervals = await this._getBlockedIntervals(task.due_date, task.id);
+      const scheduleTime = this._findNextAvailableSlot(new Date(), blockedIntervals, 30);
       await this.taskAPI.updateTask(task.id, { 
-        status: 'todo'
+        status: 'todo',
+        scheduled_date: this._formatLocalDate(scheduleTime),
+        scheduled_time: this._formatLocalTime(scheduleTime)
       });
     }
+  }
+
+  async _handleClarification(task, payload) {
+    const provider = this._getProviderFromCTOConfig();
+    let analysis = null;
+    if (provider === 'claude') {
+      analysis = await this.aiEngine?.analyzeClarificationWithClaudeApi(
+        task,
+        { history: payload?.history || [] },
+        this._getCtoModel()
+      );
+    } else if (provider === 'openai') {
+      analysis = await this.aiEngine?.analyzeClarificationWithOpenAI(
+        task,
+        { history: payload?.history || [] },
+        this._getCtoModel()
+      );
+    } else {
+      analysis = await this.aiEngine?.analyzeClarificationWithClaudeApi(
+        task,
+        { history: payload?.history || [] },
+        this._getCtoModel()
+      );
+    }
+    await this._recordAiUsage(task, analysis);
+    const answer = analysis?.canAnswer ? analysis.answer : null;
+
+    if (answer) {
+      const blockedIntervals = await this._getBlockedIntervals(task.due_date, task.id);
+      const scheduleTime = this._findNextAvailableSlot(new Date(), blockedIntervals, 30);
+      const dateStr = this._formatLocalDate(scheduleTime);
+      const timeStr = this._formatLocalTime(scheduleTime);
+
+      await this.taskAPI.addComment(
+        task.id,
+        `To CEO:\nCTO clarification provided.\n\n${answer}`,
+        true,
+        { id: 'cto-system', name: 'CTO' }
+      );
+      await this.taskAPI.updateTask(task.id, {
+        status: 'todo',
+        scheduled_date: dateStr,
+        scheduled_time: timeStr,
+        resource_metadata: JSON.stringify(this._mergeResourceMetadata(task.resource_metadata, { cto_event: null }))
+      });
+      return { action: 'clarify', reason: 'Clarification provided', confidence: 80 };
+    }
+
+    await this.taskAPI.updateTask(task.id, {
+      status: 'blocked',
+      resource_metadata: JSON.stringify(this._mergeResourceMetadata(task.resource_metadata, {
+        cto_warning: 'CTO needs CEO clarification to proceed.',
+        cto_warning_at: new Date().toISOString()
+      }))
+    });
+    await this.taskAPI.addComment(
+      task.id,
+      `To CEO:\nCTO needs clarification from CEO to proceed.`,
+      true,
+      { id: 'cto-system', name: 'CTO' }
+    );
+    return { action: 'block_ceo', reason: 'Needs CEO clarification', confidence: 50 };
+  }
+
+  async _handleExecutionFailure(task, payload) {
+    const provider = this._getProviderFromCTOConfig();
+    let analysis = null;
+    if (provider === 'claude') {
+      analysis = await this.aiEngine?.analyzeFailureWithClaudeApi(
+        task,
+        { lastOutput: this._summarizeOutput((payload?.history || []).map(h => h.content).join('\n'), 1500) },
+        this._getCtoModel()
+      );
+    } else if (provider === 'openai') {
+      analysis = await this.aiEngine?.analyzeFailureWithOpenAI(
+        task,
+        { lastOutput: this._summarizeOutput((payload?.history || []).map(h => h.content).join('\n'), 1500) },
+        this._getCtoModel()
+      );
+    } else {
+      analysis = await this.aiEngine?.analyzeFailureWithClaudeApi(
+        task,
+        { lastOutput: this._summarizeOutput((payload?.history || []).map(h => h.content).join('\n'), 1500) },
+        this._getCtoModel()
+      );
+    }
+    await this._recordAiUsage(task, analysis);
+
+    if (analysis?.action === 'retry_execute') {
+      const blockedIntervals = await this._getBlockedIntervals(task.due_date, task.id);
+      const scheduleTime = this._findNextAvailableSlot(new Date(), blockedIntervals, 30);
+      const dateStr = this._formatLocalDate(scheduleTime);
+      const timeStr = this._formatLocalTime(scheduleTime);
+
+      await this.taskAPI.updateTask(task.id, {
+        status: 'todo',
+        scheduled_date: dateStr,
+        scheduled_time: timeStr,
+        resource_metadata: JSON.stringify(this._mergeResourceMetadata(task.resource_metadata, { cto_event: null }))
+      });
+      await this.taskAPI.addComment(
+        task.id,
+        `To CEO:\nCTO retrying execution.\n\n${analysis.comment || ''}`,
+        true,
+        { id: 'cto-system', name: 'CTO' }
+      );
+      return { action: 'retry_execute', reason: analysis.reasoning || 'Retry', confidence: 70 };
+    }
+
+    await this.taskAPI.updateTask(task.id, {
+      status: 'blocked',
+      resource_metadata: JSON.stringify(this._mergeResourceMetadata(task.resource_metadata, {
+        cto_warning: analysis?.comment || 'CTO blocked task after failure.',
+        cto_warning_at: new Date().toISOString()
+      }))
+    });
+    await this.taskAPI.addComment(
+      task.id,
+      `To CEO:\nCTO blocked task after failure.\n\n${analysis?.comment || ''}`,
+      true,
+      { id: 'cto-system', name: 'CTO' }
+    );
+    return { action: 'block_ceo', reason: analysis?.reasoning || 'Blocked', confidence: 50 };
+  }
+
+  _mergeResourceMetadata(existing, updates) {
+    let base = {};
+    try {
+      base = existing ? JSON.parse(existing) : {};
+    } catch {
+      base = {};
+    }
+    return { ...base, ...updates };
+  }
+
+  async _getUsageSummary(task, hours, options = {}) {
+    if (!this.taskAPI?.getUsageSummary) return null;
+    try {
+      return await this.taskAPI.getUsageSummary({
+        projectId: task?.project_id || null,
+        teamId: task?.team_id || null,
+        taskId: options.taskId || null,
+        hours
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  _evaluateBudgetStatus(task, summary24h, summary7d, taskSummary7d) {
+    const budgets = this.costBudgets || {};
+    const warnings = [];
+    const ratios = {};
+
+    if (budgets.perTeamDailyUsd && summary24h?.total_cost_usd != null) {
+      ratios.teamDaily = summary24h.total_cost_usd / budgets.perTeamDailyUsd;
+      if (summary24h.total_cost_usd > budgets.perTeamDailyUsd) {
+        warnings.push(`Team daily spend ${summary24h.total_cost_usd.toFixed(2)} > ${budgets.perTeamDailyUsd.toFixed(2)} USD`);
+      }
+    }
+
+    if (budgets.perProjectWeeklyUsd && summary7d?.total_cost_usd != null) {
+      ratios.projectWeekly = summary7d.total_cost_usd / budgets.perProjectWeeklyUsd;
+      if (summary7d.total_cost_usd > budgets.perProjectWeeklyUsd) {
+        warnings.push(`Project weekly spend ${summary7d.total_cost_usd.toFixed(2)} > ${budgets.perProjectWeeklyUsd.toFixed(2)} USD`);
+      }
+    }
+
+    if (budgets.perTaskUsd && taskSummary7d?.total_cost_usd != null) {
+      ratios.task = taskSummary7d.total_cost_usd / budgets.perTaskUsd;
+      if (taskSummary7d.total_cost_usd > budgets.perTaskUsd) {
+        warnings.push(`Task cost ${taskSummary7d.total_cost_usd.toFixed(2)} > ${budgets.perTaskUsd.toFixed(2)} USD`);
+      }
+    }
+
+    return {
+      budgets,
+      ratios,
+      warnings,
+      shouldWarn: warnings.length > 0
+    };
+  }
+
+  async _maybeWarnBudget(task, budgetStatus) {
+    if (!budgetStatus?.shouldWarn) return;
+    const warningMsg = `CEO ATTENTION: Cost budget exceeded. ${budgetStatus.warnings.join(' | ')}`;
+
+    let meta = {};
+    try {
+      meta = task.resource_metadata ? JSON.parse(task.resource_metadata) : {};
+    } catch {
+      meta = {};
+    }
+
+    const lastWarningAt = meta.cto_cost_warning_at ? new Date(meta.cto_cost_warning_at).getTime() : 0;
+    const now = Date.now();
+    if (lastWarningAt && now - lastWarningAt < 6 * 60 * 60 * 1000) return;
+
+    const merged = { ...meta, cto_warning: warningMsg, cto_cost_warning_at: new Date().toISOString() };
+    try {
+      await this.taskAPI.updateTask(task.id, {
+        resource_metadata: JSON.stringify(merged)
+      });
+      await this.taskAPI.addComment(
+        task.id,
+        `To CEO:\n${warningMsg}`,
+        true,
+        { id: 'cto-system', name: 'CTO' }
+      );
+    } catch (e) {
+      console.warn('[CTO] Failed to record budget warning:', e.message);
+    }
+  }
+
+  async _flagCriticalDecision(task, warningMsg) {
+    try {
+      const resourceMetadata = JSON.stringify(this._mergeResourceMetadata(task.resource_metadata, {
+        cto_warning: warningMsg,
+        cto_warning_at: new Date().toISOString(),
+        cto_event: 'critical_decision'
+      }));
+      await this.taskAPI.updateTask(task.id, {
+        status: 'blocked',
+        resource_metadata: resourceMetadata
+      });
+      await this.taskAPI.addComment(
+        task.id,
+        `To CEO:\n${warningMsg}\n\nPlease review and approve before execution.`,
+        true,
+        { id: 'cto-system', name: 'CTO' }
+      );
+    } catch (e) {
+      console.warn('[CTO] Failed to flag critical decision:', e.message);
+    }
+  }
+
+  async _recordAiUsage(task, analysis) {
+    if (!this.usageTracker || !analysis?._usage) return;
+    const usage = analysis._usage;
+    const event = usage.provider === 'openai'
+      ? this.usageTracker.buildOpenAIUsageEvent(
+          task,
+          'cto',
+          usage.provider,
+          usage.model,
+          usage.usage,
+          usage.raw
+        )
+      : this.usageTracker.buildClaudeUsageEvent(
+          task,
+          'cto',
+          usage.provider,
+          usage.model,
+          usage.usage,
+          usage.modelUsage,
+          usage.raw
+        );
+    await this.usageTracker.recordEvent(event);
   }
 
   // ========== PRIVATE HELPERS ==========
@@ -1220,12 +1567,52 @@ Please address the issues above and resubmit for review.
 
   _getModelForProvider(provider) {
     const models = {
-      claude: 'claude-sonnet-4.5',
-      gemini: 'gemini-3-pro',
-      codex: 'gpt-5.2-mini',
-      openai: 'gpt-5.2'
+      claude: 'claude-sonnet-4-5-20250929',
+      gemini: 'gemini-3-pro-preview',
+      codex: 'gpt-5.2',
+      openai: 'gpt-5.2',
+      openai_sdk: 'gpt-5.2',
+      claude_sdk: null
     };
-    return models[provider] || 'claude-sonnet-4.5';
+    return models[provider] || 'claude-sonnet-4-5-20250929';
+  }
+
+  _getCtoModel() {
+    const provider = this._getProviderFromCTOConfig();
+    if (provider === 'claude') return 'claude-opus-4-5-20251101';
+    if (provider === 'gemini') return 'gemini-3-pro-preview';
+    if (provider === 'openai') return 'gpt-5.2-pro';
+    return this.ctoModel || 'claude-opus-4-5-20251101';
+  }
+
+  _getTeamLeadProviderFromCTO() {
+    const provider = this._getProviderFromCTOConfig();
+    if (provider === 'claude') return 'claude_sdk';
+    if (provider === 'gemini') return 'gemini';
+    if (provider === 'openai') return 'openai_sdk';
+    return 'gemini';
+  }
+
+  _getTeamLeadModel(provider) {
+    if (provider === 'claude_sdk' || provider === 'claude') return 'claude-sonnet-4-5-20250929';
+    if (provider === 'gemini') return 'gemini-3-pro-preview';
+    if (provider === 'openai_sdk' || provider === 'codex' || provider === 'openai') return 'gpt-5.2';
+    return null;
+  }
+
+  _getTeamLeadThinking(provider) {
+    if (provider === 'claude_sdk' || provider === 'claude') {
+      return { enabled: true, budget_tokens: 4000 };
+    }
+    return { enabled: false };
+  }
+
+  _getProviderFromCTOConfig() {
+    const value = String(this.ctoProvider || '').toLowerCase();
+    if (value.includes('gemini')) return 'gemini';
+    if (value.includes('claude')) return 'claude';
+    if (value.includes('codex') || value.includes('openai') || value.includes('gpt')) return 'openai';
+    return null;
   }
 
   async _logDecision(task, decision) {
@@ -1257,8 +1644,221 @@ Please address the issues above and resubmit for review.
       }
 
       await fs.writeFile(this.decisionLogFile, existing + entry);
+      await this.proactiveMemory.recordDecision(task, decision);
     } catch (e) {
       console.error('[CTO] Failed to log decision:', e.message);
+    }
+  }
+
+  async recordOutcome(outcome) {
+    await this.taskHistory.recordOutcome(outcome);
+    await this.proactiveMemory.recordOutcome(outcome);
+  }
+
+  async runHeartbeat() {
+    try {
+      await this.proactiveMemory.ensureStructure();
+      const tasks = await this.taskAPI.getAllTasks();
+      const teams = this.taskAPI.getAllTeams ? await this.taskAPI.getAllTeams() : [];
+
+      const now = Date.now();
+      const counts = tasks.reduce((acc, t) => {
+        const status = (t.status || '').toLowerCase();
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {});
+
+      const stale = tasks.filter(t => {
+        const status = (t.status || '').toLowerCase();
+        if (!['in-progress', 'blocked', 'for-review'].includes(status)) return false;
+        const updated = t.updated_at ? new Date(t.updated_at).getTime() : null;
+        return updated && now - updated > 24 * 60 * 60 * 1000;
+      });
+
+      const blocked = tasks.filter(t => (t.status || '').toLowerCase() === 'blocked');
+      const review = tasks.filter(t => (t.status || '').toLowerCase() === 'for-review');
+      const overdue = tasks.filter(t => {
+        const status = (t.status || '').toLowerCase();
+        if (!t.due_date) return false;
+        if (['done', 'completed', 'archived', 'cancelled'].includes(status)) return false;
+        return new Date(t.due_date).getTime() < now;
+      });
+
+      const leadStatus = teams.map(team => {
+        const lead = team.lead;
+        return `- ${team.name}: ${lead?.name || 'No lead'}${lead?.runner_last_seen ? ` (last seen ${lead.runner_last_seen})` : ''}`;
+      });
+
+      // Heartbeat actions (no backlog handling, leave to normal CTO flow)
+      await this._heartbeatHandleBlocked(blocked);
+      await this._heartbeatHandleReview(review);
+      await this._heartbeatHandleOverdue(overdue);
+      await this._heartbeatHandleStale(stale);
+      await this._heartbeatHandleInactiveLeads(teams, tasks);
+
+      const report = [
+        `**Summary**`,
+        `- Backlog: ${counts.backlog || 0}`,
+        `- Todo: ${counts.todo || 0}`,
+        `- In Progress: ${counts['in-progress'] || 0}`,
+        `- Blocked: ${counts.blocked || 0}`,
+        `- For Review: ${counts['for-review'] || 0}`,
+        ``,
+        `**Blocked Tasks**`,
+        blocked.length ? blocked.slice(0, 5).map(t => `- ${t.title} (${t.id})`).join('\n') : 'None',
+        ``,
+        `**For Review**`,
+        review.length ? review.slice(0, 5).map(t => `- ${t.title} (${t.id})`).join('\n') : 'None',
+        ``,
+        `**Overdue**`,
+        overdue.length ? overdue.slice(0, 5).map(t => `- ${t.title} (${t.id})`).join('\n') : 'None',
+        ``,
+        `**Stale Tasks (>24h)**`,
+        stale.length ? stale.slice(0, 5).map(t => `- ${t.title} (${t.id})`).join('\n') : 'None',
+        ``,
+        `**Team Lead Status**`,
+        leadStatus.length ? leadStatus.join('\n') : 'No teams'
+      ].join('\n');
+
+      await this.proactiveMemory.writeHeartbeat(report);
+    } catch (e) {
+      console.warn('[CTO] Heartbeat failed:', e.message);
+    }
+  }
+
+  _formatLocalDateTime(date) {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}` };
+  }
+
+  _shouldHeartbeatAct(task, key, windowMs = 6 * 60 * 60 * 1000) {
+    try {
+      const meta = task.resource_metadata ? JSON.parse(task.resource_metadata) : {};
+      const last = meta?.heartbeat_actions?.[key];
+      if (!last) return true;
+      return Date.now() - new Date(last).getTime() > windowMs;
+    } catch {
+      return true;
+    }
+  }
+
+  _recordHeartbeatAction(task, key) {
+    let existing = {};
+    try {
+      existing = task.resource_metadata ? JSON.parse(task.resource_metadata) : {};
+    } catch {}
+    const heartbeatActions = { ...(existing.heartbeat_actions || {}) };
+    heartbeatActions[key] = new Date().toISOString();
+    return this._mergeResourceMetadata(task.resource_metadata, {
+      heartbeat_actions: heartbeatActions
+    });
+  }
+
+  async _heartbeatHandleBlocked(blockedTasks) {
+    for (const task of blockedTasks) {
+      if (!this._shouldHeartbeatAct(task, 'blocked')) continue;
+      let comments = [];
+      try {
+        comments = await this.taskAPI.getTaskComments(task.id);
+      } catch {}
+      const lastHumanComment = [...comments].reverse().find(c => !c.is_system);
+      const content = lastHumanComment?.content || '';
+      const needsClarification = this._blockedNeedsClarification(content);
+
+      if (needsClarification) {
+        const warningMsg = 'CTO heartbeat: Blocked task needs clarification from CEO.';
+        const resource_metadata = JSON.stringify(this._recordHeartbeatAction(task, 'blocked'));
+        await this.taskAPI.updateTask(task.id, { resource_metadata });
+        await this.taskAPI.addComment(
+          task.id,
+          `To CEO:\n${warningMsg}\n\nTeam lead note:\n${this._summarizeOutput(content, 800)}`,
+          true,
+          { id: 'cto-system', name: 'CTO' }
+        );
+      } else {
+        const next = new Date(Date.now() + 30 * 60 * 1000);
+        const { date, time } = this._formatLocalDateTime(next);
+        const msg = 'CTO heartbeat: Blocked task reviewed. Resuming execution.';
+        const resource_metadata = JSON.stringify(this._recordHeartbeatAction(task, 'blocked'));
+        await this.taskAPI.updateTask(task.id, {
+          status: 'todo',
+          scheduled_date: date,
+          scheduled_time: time,
+          resource_metadata
+        });
+        await this.taskAPI.addComment(task.id, `To CEO:\n${msg}`, true, { id: 'cto-system', name: 'CTO' });
+      }
+    }
+  }
+
+  _blockedNeedsClarification(text) {
+    const t = (text || '').toLowerCase();
+    if (!t) return false;
+    return t.includes('needs clarification')
+      || t.includes('need clarification')
+      || t.includes('clarification required')
+      || t.includes('clarify')
+      || t.includes('missing information')
+      || t.includes('need more information');
+  }
+
+  async _heartbeatHandleReview(reviewTasks) {
+    for (const task of reviewTasks) {
+      if (!this._shouldHeartbeatAct(task, 'review')) continue;
+      const msg = 'CTO heartbeat: Task awaiting review. Please verify completion.';
+      const resource_metadata = JSON.stringify(this._recordHeartbeatAction(task, 'review'));
+      await this.taskAPI.updateTask(task.id, { resource_metadata });
+      await this.taskAPI.addComment(task.id, `To CEO:\n${msg}`, true, { id: 'cto-system', name: 'CTO' });
+    }
+  }
+
+  async _heartbeatHandleOverdue(overdueTasks) {
+    for (const task of overdueTasks) {
+      if (!this._shouldHeartbeatAct(task, 'overdue')) continue;
+      const next = new Date(Date.now() + 30 * 60 * 1000);
+      const { date, time } = this._formatLocalDateTime(next);
+      const msg = `CTO heartbeat: Task overdue. Rescheduled to ${date} ${time}.`;
+      const resource_metadata = JSON.stringify(this._recordHeartbeatAction(task, 'overdue'));
+      await this.taskAPI.updateTask(task.id, {
+        status: 'todo',
+        scheduled_date: date,
+        scheduled_time: time,
+        resource_metadata
+      });
+      await this.taskAPI.addComment(task.id, `To CEO:\n${msg}`, true, { id: 'cto-system', name: 'CTO' });
+    }
+  }
+
+  async _heartbeatHandleStale(staleTasks) {
+    for (const task of staleTasks) {
+      if (!this._shouldHeartbeatAct(task, 'stale')) continue;
+      const msg = 'CTO heartbeat: Task stale >24h. CEO attention required.';
+      const resource_metadata = JSON.stringify(this._recordHeartbeatAction(task, 'stale'));
+      await this.taskAPI.updateTask(task.id, { status: 'blocked', resource_metadata });
+      await this.taskAPI.addComment(task.id, `To CEO:\n${msg}`, true, { id: 'cto-system', name: 'CTO' });
+    }
+  }
+
+  async _heartbeatHandleInactiveLeads(teams, tasks) {
+    const now = Date.now();
+    for (const team of teams) {
+      const lead = team.lead;
+      if (!lead?.runner_last_seen) continue;
+      const lastSeen = new Date(lead.runner_last_seen).getTime();
+      if (Number.isNaN(lastSeen) || now - lastSeen < 24 * 60 * 60 * 1000) continue;
+
+      const affected = tasks.filter(t => t.team_id === team.id && ['todo', 'in-progress', 'blocked', 'for-review'].includes((t.status || '').toLowerCase()));
+      for (const task of affected) {
+        if (!this._shouldHeartbeatAct(task, 'lead_inactive')) continue;
+        const msg = `CTO heartbeat: Team lead inactive (>24h). CEO attention required.`;
+        const resource_metadata = JSON.stringify(this._recordHeartbeatAction(task, 'lead_inactive'));
+        await this.taskAPI.updateTask(task.id, { status: 'blocked', resource_metadata });
+        await this.taskAPI.addComment(task.id, `To CEO:\n${msg}`, true, { id: 'cto-system', name: 'CTO' });
+      }
     }
   }
 }

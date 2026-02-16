@@ -1,0 +1,16 @@
+devops-iac-engineer
+founder-sales
+microservices-architecture
+alert-manager
+code-review
+code-refactoring-tech-debt
+backend-architect
+feedback-mastery
+performance-profiling
+page-cro
+event-driven-architect
+landing-page-design
+enterprise-sales
+api-versioning-strategy
+kubernetes
+marketing-strategy-pmm

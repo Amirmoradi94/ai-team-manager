@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145maj-geddes/useful-ai-prompts@microservices-architecture[0m [36m80 installs[0m
+[38;5;102m└ https://skills.sh/aj-geddes/useful-ai-prompts/microservices-architecture[0m
+
+[38;5;145mmanutej/luxor-claude-marketplace@fastapi-microservices-development[0m [36m52 installs[0m
+[38;5;102m└ https://skills.sh/manutej/luxor-claude-marketplace/fastapi-microservices-development[0m
+
+[38;5;145mpatricio0312rev/skills@mermaid-diagram-generator[0m [36m27 installs[0m
+[38;5;102m└ https://skills.sh/patricio0312rev/skills/mermaid-diagram-generator[0m
+
+[38;5;145mmanutej/luxor-claude-marketplace@express-microservices-architecture[0m [36m26 installs[0m
+[38;5;102m└ https://skills.sh/manutej/luxor-claude-marketplace/express-microservices-architecture[0m
+
+[38;5;145mpersonamanagmentlayer/pcl@microservices-expert[0m [36m22 installs[0m
+[38;5;102m└ https://skills.sh/personamanagmentlayer/pcl/microservices-expert[0m
+
+[38;5;145msecondsky/claude-skills@microservices-patterns[0m [36m13 installs[0m
+[38;5;102m└ https://skills.sh/secondsky/claude-skills/microservices-patterns[0m
+

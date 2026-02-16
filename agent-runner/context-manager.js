@@ -1,18 +1,29 @@
 /**
  * Company Context Manager
  *
- * Manages the ~/mycompany/ directory structure and keeps it synchronized
+ * Manages the repo-local mycompany/ directory structure and keeps it synchronized
  * with the task-manager database. This ensures AI agents always have
  * up-to-date context about the company, projects, teams, and employees.
  */
 
+const fsSync = require('fs');
 const fs = require('fs').promises;
 const path = require('path');
-const os = require('os');
 
 class CompanyContextManager {
   constructor() {
-    this.companyDir = path.join(os.homedir(), 'mycompany');
+    this.companyDir = path.resolve(__dirname, '..', 'mycompany');
+    this.skillsPoolPath = path.resolve(__dirname, 'skills', 'pool.json');
+    this.skillsDocDir = path.resolve(__dirname, 'skills', 'documentation');
+    this.skillsRootDir = path.resolve(__dirname, 'skills');
+    this.skillsMeta = null;
+    this.coreToolDescriptions = {
+      file_edit: 'Edits or creates files in the workspace safely.',
+      terminal: 'Executes shell commands in the workspace.',
+      browser: 'Browses the web and extracts information.',
+      npm_install: 'Installs Node.js dependencies for a project.',
+      git: 'Performs git operations like status, diff, and commit.'
+    };
   }
 
   /**
@@ -95,6 +106,7 @@ class CompanyContextManager {
 
     const employees = await db.all('SELECT * FROM specialists ORDER BY name');
     const employeesDir = path.join(this.companyDir, 'employees');
+    await this.loadSkillsMetadata();
 
     // Get valid employee file names
     const validFileNames = new Set(
@@ -154,8 +166,98 @@ class CompanyContextManager {
       tools = [];
     }
 
+    await this.ensureSkillDocs(tools);
     const content = this.generateEmployeeProfile(employee, teams, tools);
     await fs.writeFile(filePath, content, 'utf8');
+  }
+
+  parseFrontmatter(content) {
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!match) return {};
+    const lines = match[1].split('\n');
+    const data = {};
+    for (const line of lines) {
+      const idx = line.indexOf(':');
+      if (idx === -1) continue;
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      data[key] = value;
+    }
+    return data;
+  }
+
+  collectSkillDocs(rootDir) {
+    const results = [];
+    if (!fsSync.existsSync(rootDir)) return results;
+    const entries = fsSync.readdirSync(rootDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(rootDir, entry.name);
+      if (entry.isDirectory()) {
+        results.push(...this.collectSkillDocs(fullPath));
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+        results.push(fullPath);
+      }
+    }
+    return results;
+  }
+
+  async loadSkillsMetadata() {
+    if (this.skillsMeta) return;
+    try {
+      if (fsSync.existsSync(this.skillsPoolPath)) {
+        const raw = await fs.readFile(this.skillsPoolPath, 'utf8');
+        const skills = JSON.parse(raw);
+        this.skillsMeta = new Map(
+          skills.map((s) => [s.id, { description: s.description || '', label: s.label || '' }])
+        );
+        return;
+      }
+      const docs = this.collectSkillDocs(this.skillsRootDir);
+      const meta = new Map();
+      for (const docPath of docs) {
+        try {
+          const content = await fs.readFile(docPath, 'utf8');
+          const frontmatter = this.parseFrontmatter(content);
+          const dirName = path.basename(path.dirname(docPath));
+          const fileName = path.basename(docPath, path.extname(docPath));
+          const id = frontmatter.name || (fileName.toLowerCase() === 'skill' ? dirName : fileName);
+          const label = frontmatter.title || frontmatter.name || id;
+          const description = frontmatter.description || '';
+          if (id) meta.set(id, { description, label });
+        } catch (err) {
+          console.warn(`[ContextManager] Failed to read skill doc ${docPath}: ${err.message}`);
+        }
+      }
+      this.skillsMeta = meta;
+    } catch (e) {
+      console.warn(`[ContextManager] Failed to load skills metadata: ${e.message}`);
+      this.skillsMeta = new Map();
+    }
+  }
+
+  async ensureSkillDocs(tools) {
+    await fs.mkdir(this.skillsDocDir, { recursive: true });
+    for (const tool of tools) {
+      const docPath = path.join(this.skillsDocDir, `${tool}.md`);
+      if (fsSync.existsSync(docPath)) continue;
+      const description = this.getSkillDescription(tool);
+      const content = `# ${tool}\n\n${description}\n`;
+      await fs.writeFile(docPath, content, 'utf8');
+      console.log(`[ContextManager] Created missing skill doc: ${docPath}`);
+    }
+  }
+
+  getSkillDescription(tool) {
+    const meta = this.skillsMeta?.get(tool);
+    if (meta?.description) return meta.description;
+    if (this.coreToolDescriptions[tool]) return this.coreToolDescriptions[tool];
+    return 'Description not available.';
+  }
+
+  getSkillLabel(tool) {
+    const meta = this.skillsMeta?.get(tool);
+    if (meta?.label) return meta.label;
+    return tool;
   }
 
   /**
@@ -341,7 +443,7 @@ For detailed information about specific entities, navigate to their respective d
 ## Directory Structure
 
 \`\`\`
-~/mycompany/
+mycompany/
 ├── organization/    # Company-wide overviews
 ├── employees/       # Individual employee profiles
 ├── teams/          # Team configurations and members
@@ -437,6 +539,12 @@ For detailed information about specific entities, navigate to their respective d
 
 **Description**: ${employee.description || 'No description provided'}
 
+## Model Profiles
+
+- **Claude**: ${employee.model_claude || 'Not set'}
+- **Gemini**: ${employee.model_gemini || 'Not set'}
+- **OpenAI**: ${employee.model_openai || 'Not set'}
+
 ## System Instructions
 
 \`\`\`
@@ -450,7 +558,10 @@ ${employee.system_prompt || 'No system prompt configured'}
     if (tools.length > 0) {
       content += `**Total Skills**: ${tools.length}\n\n`;
       for (const tool of tools) {
-        content += `- ${tool}\n`;
+        const description = this.getSkillDescription(tool);
+        const label = this.getSkillLabel(tool);
+        const docPath = path.join(this.skillsDocDir, `${tool}.md`);
+        content += `- ${label}: ${description} (${docPath})\n`;
       }
     } else {
       content += `No skills assigned yet.\n`;

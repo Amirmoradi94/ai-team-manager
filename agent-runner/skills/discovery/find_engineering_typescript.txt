@@ -1,0 +1,28 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[38;5;102mInstall with[0m npx skills add <owner/repo@skill>
+
+[38;5;145mwshobson/agents@typescript-advanced-types[0m [36m6.1K installs[0m
+[38;5;102m└ https://skills.sh/wshobson/agents/typescript-advanced-types[0m
+
+[38;5;145msoftaworks/agent-toolkit@openapi-to-typescript[0m [36m1.7K installs[0m
+[38;5;102m└ https://skills.sh/softaworks/agent-toolkit/openapi-to-typescript[0m
+
+[38;5;145msickn33/antigravity-awesome-skills@typescript-expert[0m [36m1.3K installs[0m
+[38;5;102m└ https://skills.sh/sickn33/antigravity-awesome-skills/typescript-expert[0m
+
+[38;5;145mdotneet/claude-code-marketplace@typescript-react-reviewer[0m [36m711 installs[0m
+[38;5;102m└ https://skills.sh/dotneet/claude-code-marketplace/typescript-react-reviewer[0m
+
+[38;5;145mbmad-labs/skills@typescript-e2e-testing[0m [36m616 installs[0m
+[38;5;102m└ https://skills.sh/bmad-labs/skills/typescript-e2e-testing[0m
+
+[38;5;145mopenrouterteam/agent-skills@openrouter-typescript-sdk[0m [36m532 installs[0m
+[38;5;102m└ https://skills.sh/openrouterteam/agent-skills/openrouter-typescript-sdk[0m
+

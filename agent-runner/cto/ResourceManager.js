@@ -52,16 +52,8 @@ class ResourceManager {
   }
 
   async checkExternalStatus() {
-    console.log('[ResourceManager] Starting external status check...');
-    
-    // 1. Check Claude Authentication
-    await this._checkClaudeAuth();
-    
-    // 2. Check Gemini Authentication
-    await this._checkGeminiAuth();
-    
-    // 3. Check Codex Authentication
-    await this._checkCodexAuth();
+    // Health checks disabled by request
+    return;
   }
 
   async checkExternalStatusWithExecutor(executor, prompt = 'hello') {
@@ -122,24 +114,30 @@ class ResourceManager {
       // 2. CLI Check (Fallback)
       // Try a simple, quick command to test authentication
       // Using --version or help to check if authenticated
-      const { stdout, stderr } = await execPromise('claude --version', { timeout: 5000 });
+      const { stdout, stderr } = await execPromise('export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; claude --version', { timeout: 5000 });
       const output = (stdout + stderr).toLowerCase();
       
-      // Check for authentication errors
+      // Check for authentication or capacity errors
       if (output.includes('401') || 
           output.includes('unauthorized') || 
           output.includes('not authenticated') ||
           output.includes('please log in') ||
           output.includes('login') ||
           output.includes('session expired') ||
-          output.includes('reauthenticate')) {
-        this.externalState.claudeAuth = { needsAuth: true, reason: 'Claude not authenticated', updatedAt: Date.now() };
+          output.includes('reauthenticate') ||
+          output.includes('credit balance is too low') ||
+          output.includes('exhausted your capacity')) {
+        this.externalState.claudeAuth = { 
+          needsAuth: true, 
+          reason: output.includes('credit') ? 'Insufficient credits' : 'Claude not authenticated', 
+          updatedAt: Date.now() 
+        };
       } else {
         // Claude is authenticated - now try to get usage info via cmonitor
         this.externalState.claudeAuth = { needsAuth: false, updatedAt: Date.now() };
         
         try {
-          const { stdout: monitorOut } = await execPromise('cmonitor --refresh-rate 1 --log-level INFO', { timeout: 5000 });
+          const { stdout: monitorOut } = await execPromise('export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; cmonitor --refresh-rate 1 --log-level INFO', { timeout: 5000 });
           const lines = monitorOut.split('\n');
           let synced = false;
           
@@ -201,37 +199,73 @@ class ResourceManager {
   async _checkGeminiAuth() {
     try {
       // Try gemini --version to check if authenticated
-      const { stdout, stderr } = await execPromise('gemini --version', { timeout: 5000 });
+      const { stdout, stderr } = await execPromise('export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; gemini --version', { timeout: 5000 });
       const output = (stdout + stderr).toLowerCase();
       
       // Gemini version command works, but we need to check if authenticated for actual usage
       // Try a simple prompt to test authentication
       try {
         const { stdout: testOut, stderr: testErr } = await execPromise(
-          'echo "test" | gemini -p "respond with only the word OK"',
+          'export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; echo "test" | gemini -p "respond with only the word OK"',
           { timeout: 8000, maxBuffer: 1024 }
         );
         const testOutput = (testOut + testErr).toLowerCase();
         
-        if (testOutput.includes('ok') || 
-            (!testOutput.includes('401') && !testOutput.includes('unauthorized') && !testOutput.includes('error'))) {
-          // Gemini is working - set default healthy status
-          // Gemini CLI doesn't expose usage limits directly, so we assume healthy
-          this.externalState.geminiAuth = { needsAuth: false, updatedAt: Date.now() };
-          this.externalState.gemini = {
-            remaining5h: 1000, // Infinite for practical purposes
-            remainingDay: 500, // Ultra plan daily limit
-            updatedAt: Date.now()
-          };
-        } else if (testOutput.includes('401') || 
-                   testOutput.includes('unauthorized') || 
-                   testOutput.includes('not authenticated') ||
-                   testOutput.includes('authentication') ||
-                   testOutput.includes('please log in') ||
-                   testOutput.includes('login')) {
-          this.externalState.geminiAuth = { needsAuth: true, reason: 'Gemini not authenticated', updatedAt: Date.now() };
-          this.externalState.gemini = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
-        }
+                if ((testOutput.includes('ok') || 
+        
+                    (!testOutput.includes('401') && !testOutput.includes('unauthorized') && !testOutput.includes('error'))) &&
+        
+                    !testOutput.includes('exhausted your capacity') &&
+        
+                    !testOutput.includes('no capacity available')) {
+        
+                  // Gemini is working - set default healthy status
+        
+                  // Gemini CLI doesn't expose usage limits directly, so we assume healthy
+        
+                  this.externalState.geminiAuth = { needsAuth: false, updatedAt: Date.now() };
+        
+                  this.externalState.gemini = {
+        
+                    remaining5h: 1000, // Infinite for practical purposes
+        
+                    remainingDay: 500, // Ultra plan daily limit
+        
+                    updatedAt: Date.now()
+        
+                  };
+        
+                } else if (testOutput.includes('401') || 
+        
+                           testOutput.includes('unauthorized') || 
+        
+                           testOutput.includes('not authenticated') ||
+        
+                           testOutput.includes('authentication') ||
+        
+                           testOutput.includes('please log in') ||
+        
+                           testOutput.includes('login') ||
+        
+                           testOutput.includes('exhausted') ||
+        
+                           testOutput.includes('no capacity')) {
+        
+                  this.externalState.geminiAuth = { 
+        
+                    needsAuth: true, 
+        
+                    reason: (testOutput.includes('exhausted') || testOutput.includes('capacity')) ? 'Capacity exhausted' : 'Gemini not authenticated', 
+        
+                    updatedAt: Date.now() 
+        
+                  };
+        
+                  this.externalState.gemini = { remaining5h: 0, remainingDay: 0, updatedAt: Date.now() };
+        
+                }
+        
+        
       } catch (testError) {
         const testErrorMsg = testError.message.toLowerCase();
         if (testErrorMsg.includes('401') || 
@@ -285,7 +319,7 @@ class ResourceManager {
     try {
       // Try a simple command to check if Codex is available and authenticated
       // Codex CLI might be 'codex' or part of OpenAI CLI
-      const { stdout, stderr } = await execPromise('which codex 2>/dev/null || echo "not-found"', { timeout: 3000 });
+      const { stdout, stderr } = await execPromise('export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; which codex 2>/dev/null || echo "not-found"', { timeout: 3000 });
       
       if (stdout.includes('not-found')) {
         this.externalState.codexAuth = { needsAuth: true, reason: 'Codex CLI not installed', updatedAt: Date.now() };
@@ -294,7 +328,7 @@ class ResourceManager {
       }
 
       // Try to execute a simple test
-      const { stdout: testOut, stderr: testErr } = await execPromise('codex --version 2>&1', { timeout: 3000 });
+      const { stdout: testOut, stderr: testErr } = await execPromise('export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; codex --version 2>&1', { timeout: 3000 });
       const output = (testOut + testErr).toLowerCase();
       
       if (output.includes('401') || 
